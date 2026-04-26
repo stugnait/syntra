@@ -12,6 +12,7 @@ const FACEIT_REDIRECT_URI =
 const FACEIT_CLIENT_ID = process.env.FACEIT_CLIENT_ID
 const FACEIT_CLIENT_SECRET = process.env.FACEIT_CLIENT_SECRET
 const APP_SESSION_SECRET = process.env.APP_SESSION_SECRET
+const APP_ORIGIN = process.env.APP_ORIGIN ?? new URL(FACEIT_REDIRECT_URI).origin
 
 type OidcConfig = {
   token_endpoint?: string
@@ -78,7 +79,7 @@ export async function GET(request: NextRequest) {
   const state = query.get('state')
 
   if (!code || !state) {
-    return NextResponse.redirect(new URL('/auth?error=missing_oauth_params', request.url))
+    return NextResponse.redirect(new URL('/auth?error=missing_oauth_params', APP_ORIGIN))
   }
 
   const cookieStore = await cookies()
@@ -87,22 +88,22 @@ export async function GET(request: NextRequest) {
   const popupMode = cookieStore.get('faceit_popup_mode')?.value === '1'
 
   if (!expectedState || !codeVerifier || state !== expectedState) {
-    return NextResponse.redirect(new URL('/auth?error=invalid_oauth_state', request.url))
+    return NextResponse.redirect(new URL('/auth?error=invalid_oauth_state', APP_ORIGIN))
   }
 
   if (!FACEIT_CLIENT_ID) {
-    return NextResponse.redirect(new URL('/auth?error=missing_faceit_client_id', request.url))
+    return NextResponse.redirect(new URL('/auth?error=missing_faceit_client_id', APP_ORIGIN))
   }
 
   if (!APP_SESSION_SECRET) {
-    return NextResponse.redirect(new URL('/auth?error=missing_app_session_secret', request.url))
+    return NextResponse.redirect(new URL('/auth?error=missing_app_session_secret', APP_ORIGIN))
   }
 
   let endpoints: { tokenUrl: string; userInfoUrl: string }
   try {
     endpoints = await resolveOidcEndpoints()
   } catch {
-    return NextResponse.redirect(new URL('/auth?error=faceit_discovery_failed', request.url))
+    return NextResponse.redirect(new URL('/auth?error=faceit_discovery_failed', APP_ORIGIN))
   }
 
   const headers: HeadersInit = {
@@ -127,7 +128,7 @@ export async function GET(request: NextRequest) {
   })
 
   if (!tokenResponse.ok) {
-    return NextResponse.redirect(new URL('/auth?error=faceit_token_exchange_failed', request.url))
+    return NextResponse.redirect(new URL('/auth?error=faceit_token_exchange_failed', APP_ORIGIN))
   }
 
   const tokenData = (await tokenResponse.json()) as {
@@ -136,7 +137,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (!tokenData.access_token) {
-    return NextResponse.redirect(new URL('/auth?error=faceit_access_token_missing', request.url))
+    return NextResponse.redirect(new URL('/auth?error=faceit_access_token_missing', APP_ORIGIN))
   }
 
   const profileResponse = await fetch(endpoints.userInfoUrl, {
@@ -147,7 +148,7 @@ export async function GET(request: NextRequest) {
   })
 
   if (!profileResponse.ok) {
-    return NextResponse.redirect(new URL('/auth?error=faceit_profile_fetch_failed', request.url))
+    return NextResponse.redirect(new URL('/auth?error=faceit_profile_fetch_failed', APP_ORIGIN))
   }
 
   const profile = (await profileResponse.json()) as FaceitProfile
@@ -169,7 +170,7 @@ export async function GET(request: NextRequest) {
         `<!doctype html><html><body><script>
 const nextUrl = '/onboarding?source=faceit&status=connected';
 if (window.opener) {
-  window.opener.postMessage({ type: 'faceit-auth-success' }, '${new URL(request.url).origin}');
+  window.opener.postMessage({ type: 'faceit-auth-success' }, '${APP_ORIGIN}');
   window.close();
 } else {
   window.location.replace(nextUrl);
@@ -177,7 +178,7 @@ if (window.opener) {
 </script>Authentication completed. You can close this window.</body></html>`,
         { headers: { 'content-type': 'text/html; charset=utf-8' } },
       )
-    : NextResponse.redirect(new URL('/onboarding?source=faceit&status=connected', request.url))
+    : NextResponse.redirect(new URL('/onboarding?source=faceit&status=connected', APP_ORIGIN))
 
   response.cookies.set('faceit_oauth_state', '', { maxAge: 0, path: '/' })
   response.cookies.set('faceit_pkce_verifier', '', { maxAge: 0, path: '/' })

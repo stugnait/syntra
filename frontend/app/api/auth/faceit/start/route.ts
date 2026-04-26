@@ -6,6 +6,7 @@ const DEFAULT_REDIRECT_URI = 'https://rotting-pebbly-waggle.ngrok-free.dev/api/a
 const FACEIT_REDIRECT_URI = process.env.FACEIT_REDIRECT_URI
 const FACEIT_CLIENT_ID = process.env.FACEIT_CLIENT_ID ?? process.env.NEXT_PUBLIC_FACEIT_CLIENT_ID
 const FACEIT_SCOPE = process.env.FACEIT_SCOPE ?? process.env.FACEIT_AUTH_URL ?? 'openid profile email'
+const APP_ORIGIN = process.env.APP_ORIGIN ?? new URL(FACEIT_REDIRECT_URI ?? DEFAULT_REDIRECT_URI).origin
 
 function toBase64Url(value: Buffer) {
   return value
@@ -25,7 +26,7 @@ function sha256(value: string) {
 
 export async function GET(request: Request) {
   if (!FACEIT_CLIENT_ID) {
-    return NextResponse.redirect(new URL('/auth?error=missing_faceit_client_id', request.url))
+    return NextResponse.redirect(new URL('/auth?error=missing_faceit_client_id', APP_ORIGIN))
   }
 
   const codeVerifier = randomString(64)
@@ -34,7 +35,8 @@ export async function GET(request: Request) {
 
   const configuredRedirectUri = FACEIT_REDIRECT_URI ?? DEFAULT_REDIRECT_URI
 
-  const popupMode = new URL(request.url).searchParams.get('popup') === '1'
+  const popupParam = new URL(request.url).searchParams.get('popup')
+  const popupMode = popupParam !== '0'
 
   const authUrl =
     `${FACEIT_AUTH_ORIGIN}?` +
