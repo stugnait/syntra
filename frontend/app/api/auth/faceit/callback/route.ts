@@ -1,13 +1,44 @@
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 
-const FACEIT_TOKEN_URL = process.env.FACEIT_TOKEN_URL ?? 'https://api.faceit.com/auth/v1/oauth/token'
-const FACEIT_USERINFO_URL =
-  process.env.FACEIT_USERINFO_URL ?? 'https://api.faceit.com/auth/v1/resources/userinfo'
+const FACEIT_OIDC_CONFIG_URL =
+  process.env.FACEIT_OIDC_CONFIG_URL ?? 'https://accounts.faceit.com/.well-known/openid-configuration'
+const FACEIT_TOKEN_URL = process.env.FACEIT_TOKEN_URL
+const FACEIT_USERINFO_URL = process.env.FACEIT_USERINFO_URL
 const FACEIT_REDIRECT_URI =
   process.env.FACEIT_REDIRECT_URI ??
   'https://rotting-pebbly-waggle.ngrok-free.dev/api/auth/faceit/callback'
 const FACEIT_CLIENT_ID = process.env.FACEIT_CLIENT_ID
+const FACEIT_CLIENT_SECRET = process.env.FACEIT_CLIENT_SECRET
+
+type OidcConfig = {
+  token_endpoint?: string
+  userinfo_endpoint?: string
+}
+
+async function resolveOidcEndpoints() {
+  if (FACEIT_TOKEN_URL && FACEIT_USERINFO_URL) {
+    return {
+      tokenUrl: FACEIT_TOKEN_URL,
+      userInfoUrl: FACEIT_USERINFO_URL,
+    }
+  }
+
+  const discoveryResponse = await fetch(FACEIT_OIDC_CONFIG_URL, { cache: 'no-store' })
+  if (!discoveryResponse.ok) {
+    throw new Error('FACEIT OIDC discovery failed')
+  }
+
+  const discovery = (await discoveryResponse.json()) as OidcConfig
+  if (!discovery.token_endpoint || !discovery.userinfo_endpoint) {
+    throw new Error('FACEIT OIDC endpoints missing')
+  }
+
+  return {
+    tokenUrl: FACEIT_TOKEN_URL ?? discovery.token_endpoint,
+    userInfoUrl: FACEIT_USERINFO_URL ?? discovery.userinfo_endpoint,
+  }
+}
 
 export async function GET(request: NextRequest) {
   const query = request.nextUrl.searchParams
@@ -30,11 +61,24 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL('/auth?error=missing_faceit_client_id', request.url))
   }
 
-  const tokenResponse = await fetch(FACEIT_TOKEN_URL, {
+  let endpoints: { tokenUrl: string; userInfoUrl: string }
+  try {
+    endpoints = await resolveOidcEndpoints()
+  } catch {
+    return NextResponse.redirect(new URL('/auth?error=faceit_discovery_failed', request.url))
+  }
+
+  const headers: HeadersInit = {
+    'content-type': 'application/x-www-form-urlencoded',
+  }
+
+  if (FACEIT_CLIENT_SECRET) {
+    headers.authorization = `Basic ${Buffer.from(`${FACEIT_CLIENT_ID}:${FACEIT_CLIENT_SECRET}`).toString('base64')}`
+  }
+
+  const tokenResponse = await fetch(endpoints.tokenUrl, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/x-www-form-urlencoded',
-    },
+    headers,
     body: new URLSearchParams({
       grant_type: 'authorization_code',
       code,
@@ -51,14 +95,13 @@ export async function GET(request: NextRequest) {
 
   const tokenData = (await tokenResponse.json()) as {
     access_token?: string
-    id_token?: string
   }
 
   if (!tokenData.access_token) {
     return NextResponse.redirect(new URL('/auth?error=faceit_access_token_missing', request.url))
   }
 
-  const profileResponse = await fetch(FACEIT_USERINFO_URL, {
+  const profileResponse = await fetch(endpoints.userInfoUrl, {
     headers: {
       authorization: `Bearer ${tokenData.access_token}`,
     },
