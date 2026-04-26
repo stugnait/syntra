@@ -1,3 +1,4 @@
+import { createHash, randomBytes } from 'node:crypto'
 import { NextResponse } from 'next/server'
 
 const FACEIT_AUTH_ORIGIN = process.env.FACEIT_AUTH_ORIGIN ?? 'https://accounts.faceit.com/'
@@ -16,12 +17,11 @@ function toBase64Url(value: Buffer) {
 }
 
 function randomString(byteLength = 32) {
-  return toBase64Url(Buffer.from(crypto.getRandomValues(new Uint8Array(byteLength))))
+  return toBase64Url(randomBytes(byteLength))
 }
 
-async function sha256(value: string) {
-  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
-  return toBase64Url(Buffer.from(hash))
+function sha256(value: string) {
+  return toBase64Url(createHash('sha256').update(value).digest())
 }
 
 export async function GET(request: Request) {
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
 
   const codeVerifier = randomString(64)
   const state = randomString(32)
-  const codeChallenge = await sha256(codeVerifier)
+  const codeChallenge = sha256(codeVerifier)
 
   const authUrl =
     `${FACEIT_AUTH_ORIGIN}?` +

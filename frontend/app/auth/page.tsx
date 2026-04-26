@@ -81,10 +81,6 @@ async function startFaceitAuth() {
 export default function AuthPage() {
   const [isFaceitLoading, setIsFaceitLoading] = useState(false)
 
-  const startFaceitAuth = () => {
-    setIsFaceitLoading(true)
-    window.location.assign('/api/auth/faceit/start')
-  }
 
   return (
     <div className="relative min-h-screen bg-[#07070F] flex items-center justify-center overflow-hidden">
@@ -149,18 +145,18 @@ export default function AuthPage() {
             </div>
 
             {/* FACEIT */}
-            <button
-              type="button"
-              onClick={startFaceitAuth}
-              disabled={isFaceitLoading}
-              className="group flex items-center justify-center gap-3 w-full py-4 rounded-xl bg-violet-600 hover:bg-violet-500 border border-violet-500/30 text-white font-semibold text-sm transition-all duration-200 glow-violet-sm hover:glow-violet disabled:opacity-70 disabled:cursor-not-allowed"
+            <a
+              href="/api/auth/faceit/start"
+              onClick={() => setIsFaceitLoading(true)}
+              aria-disabled={isFaceitLoading}
+              className="group flex items-center justify-center gap-3 w-full py-4 rounded-xl bg-violet-600 hover:bg-violet-500 border border-violet-500/30 text-white font-semibold text-sm transition-all duration-200 glow-violet-sm hover:glow-violet aria-disabled:opacity-70 aria-disabled:cursor-not-allowed"
             >
               <FaceitIcon />
-              <span>{isFaceitLoading ? 'Redirecting to FACEIT…' : 'Connect FACEIT Account'}</span>
+              <span>{isFaceitLoading ? 'Opening FACEIT…' : 'Connect FACEIT Account'}</span>
               <div className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
                 <Shield size={13} className="text-violet-200" />
               </div>
-            </button>
+            </a>
           </div>
 
           {/* Fine print */}
