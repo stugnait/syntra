@@ -84,6 +84,7 @@ export async function GET(request: NextRequest) {
   const cookieStore = await cookies()
   const expectedState = cookieStore.get('faceit_oauth_state')?.value
   const codeVerifier = cookieStore.get('faceit_pkce_verifier')?.value
+  const popupMode = cookieStore.get('faceit_popup_mode')?.value === '1'
 
   if (!expectedState || !codeVerifier || state !== expectedState) {
     return NextResponse.redirect(new URL('/auth?error=invalid_oauth_state', request.url))
@@ -163,10 +164,21 @@ export async function GET(request: NextRequest) {
   }
   const appSession = createAppSession(sessionPayload, APP_SESSION_SECRET)
 
-  const response = NextResponse.redirect(new URL('/onboarding?source=faceit&status=connected', request.url))
+  const response = popupMode
+    ? new NextResponse(
+        `<!doctype html><html><body><script>
+if (window.opener) {
+  window.opener.postMessage({ type: 'faceit-auth-success' }, '${new URL(request.url).origin}');
+}
+window.close();
+</script>Authentication completed. You can close this window.</body></html>`,
+        { headers: { 'content-type': 'text/html; charset=utf-8' } },
+      )
+    : NextResponse.redirect(new URL('/onboarding?source=faceit&status=connected', request.url))
 
   response.cookies.set('faceit_oauth_state', '', { maxAge: 0, path: '/' })
   response.cookies.set('faceit_pkce_verifier', '', { maxAge: 0, path: '/' })
+  response.cookies.set('faceit_popup_mode', '', { maxAge: 0, path: '/' })
   response.cookies.set('syntra_session', appSession, {
     path: '/',
     maxAge,

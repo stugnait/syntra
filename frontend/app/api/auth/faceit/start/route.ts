@@ -34,12 +34,14 @@ export async function GET(request: Request) {
 
   const configuredRedirectUri = FACEIT_REDIRECT_URI ?? DEFAULT_REDIRECT_URI
 
+  const popupMode = new URL(request.url).searchParams.get('popup') === '1'
+
   const authUrl =
     `${FACEIT_AUTH_ORIGIN}?` +
     new URLSearchParams({
       client_id: FACEIT_CLIENT_ID,
       redirect_uri: configuredRedirectUri,
-      redirect_popup: '0',
+      redirect_popup: popupMode ? '1' : '0',
       response_type: 'code',
       response_mode: 'query',
       scope: FACEIT_SCOPE,
@@ -51,6 +53,13 @@ export async function GET(request: Request) {
   const response = NextResponse.redirect(authUrl)
 
   response.cookies.set('faceit_oauth_state', state, {
+    path: '/',
+    maxAge: 60 * 10,
+    sameSite: 'lax',
+    secure: true,
+    httpOnly: true,
+  })
+  response.cookies.set('faceit_popup_mode', popupMode ? '1' : '0', {
     path: '/',
     maxAge: 60 * 10,
     sameSite: 'lax',
