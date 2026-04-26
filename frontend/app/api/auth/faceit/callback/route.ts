@@ -1,3 +1,4 @@
+import { createHmac } from 'node:crypto'
 import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 
@@ -10,10 +11,41 @@ const FACEIT_REDIRECT_URI =
   'https://rotting-pebbly-waggle.ngrok-free.dev/api/auth/faceit/callback'
 const FACEIT_CLIENT_ID = process.env.FACEIT_CLIENT_ID
 const FACEIT_CLIENT_SECRET = process.env.FACEIT_CLIENT_SECRET
+const APP_SESSION_SECRET = process.env.APP_SESSION_SECRET
 
 type OidcConfig = {
   token_endpoint?: string
   userinfo_endpoint?: string
+}
+
+type FaceitProfile = {
+  sub?: string
+  guid?: string
+  player_id?: string
+  nickname?: string
+  email?: string
+  avatar?: string
+}
+
+function toBase64Url(text: string) {
+  return Buffer.from(text)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
+}
+
+function createAppSession(payload: Record<string, unknown>, secret: string) {
+  const header = toBase64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
+  const body = toBase64Url(JSON.stringify(payload))
+  const signature = createHmac('sha256', secret)
+    .update(`${header}.${body}`)
+    .digest('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
+
+  return `${header}.${body}.${signature}`
 }
 
 async function resolveOidcEndpoints() {
@@ -61,6 +93,10 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL('/auth?error=missing_faceit_client_id', request.url))
   }
 
+  if (!APP_SESSION_SECRET) {
+    return NextResponse.redirect(new URL('/auth?error=missing_app_session_secret', request.url))
+  }
+
   let endpoints: { tokenUrl: string; userInfoUrl: string }
   try {
     endpoints = await resolveOidcEndpoints()
@@ -95,6 +131,7 @@ export async function GET(request: NextRequest) {
 
   const tokenData = (await tokenResponse.json()) as {
     access_token?: string
+    expires_in?: number
   }
 
   if (!tokenData.access_token) {
@@ -112,16 +149,36 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL('/auth?error=faceit_profile_fetch_failed', request.url))
   }
 
-  const profile = await profileResponse.json()
+  const profile = (await profileResponse.json()) as FaceitProfile
+  const now = Math.floor(Date.now() / 1000)
+  const maxAge = Math.max(60 * 60, tokenData.expires_in ?? 60 * 60)
+  const appSession = createAppSession(
+    {
+      provider: 'faceit',
+      faceit_id: profile.sub ?? profile.guid ?? profile.player_id,
+      nickname: profile.nickname,
+      email: profile.email,
+      avatar: profile.avatar,
+      iat: now,
+      exp: now + maxAge,
+    },
+    APP_SESSION_SECRET,
+  )
 
-  // TODO: Create/link user in your database and issue your own app session here.
-  const response = NextResponse.redirect(new URL('/onboarding?source=faceit', request.url))
+  const response = NextResponse.redirect(new URL('/onboarding?source=faceit&status=connected', request.url))
 
   response.cookies.set('faceit_oauth_state', '', { maxAge: 0, path: '/' })
   response.cookies.set('faceit_pkce_verifier', '', { maxAge: 0, path: '/' })
+  response.cookies.set('syntra_session', appSession, {
+    path: '/',
+    maxAge,
+    sameSite: 'lax',
+    secure: true,
+    httpOnly: true,
+  })
   response.cookies.set('faceit_profile', encodeURIComponent(JSON.stringify(profile)), {
     path: '/',
-    maxAge: 60 * 5,
+    maxAge,
     sameSite: 'lax',
     secure: true,
     httpOnly: true,

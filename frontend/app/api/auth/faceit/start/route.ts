@@ -38,6 +38,7 @@ export async function GET(request: Request) {
     new URLSearchParams({
       client_id: FACEIT_CLIENT_ID,
       redirect_uri: FACEIT_REDIRECT_URI,
+      redirect_popup: 'false',
       response_type: 'code',
       scope: FACEIT_SCOPE,
       state,
