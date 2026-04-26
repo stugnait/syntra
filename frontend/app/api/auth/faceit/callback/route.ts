@@ -93,6 +93,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL('/auth?error=missing_faceit_client_id', request.url))
   }
 
+  if (!APP_SESSION_SECRET) {
+    return NextResponse.redirect(new URL('/auth?error=missing_app_session_secret', request.url))
+  }
 
   let endpoints: { tokenUrl: string; userInfoUrl: string }
   try {
@@ -158,9 +161,7 @@ export async function GET(request: NextRequest) {
     iat: now,
     exp: now + maxAge,
   }
-  const appSession = APP_SESSION_SECRET
-    ? createAppSession(sessionPayload, APP_SESSION_SECRET)
-    : Buffer.from(JSON.stringify(sessionPayload)).toString('base64url')
+  const appSession = createAppSession(sessionPayload, APP_SESSION_SECRET)
 
   const response = NextResponse.redirect(new URL('/onboarding?source=faceit&status=connected', request.url))
 
