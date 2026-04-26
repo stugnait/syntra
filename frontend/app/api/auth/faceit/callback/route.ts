@@ -3,7 +3,7 @@ import { cookies } from 'next/headers'
 import { NextRequest, NextResponse } from 'next/server'
 
 const FACEIT_OIDC_CONFIG_URL =
-  process.env.FACEIT_OIDC_CONFIG_URL ?? 'https://accounts.faceit.com/.well-known/openid-configuration'
+  process.env.FACEIT_OIDC_CONFIG_URL ?? 'https://api.faceit.com/auth/v1/openid_configuration'
 const FACEIT_TOKEN_URL = process.env.FACEIT_TOKEN_URL
 const FACEIT_USERINFO_URL = process.env.FACEIT_USERINFO_URL
 const FACEIT_REDIRECT_URI =
@@ -152,18 +152,16 @@ export async function GET(request: NextRequest) {
   const profile = (await profileResponse.json()) as FaceitProfile
   const now = Math.floor(Date.now() / 1000)
   const maxAge = Math.max(60 * 60, tokenData.expires_in ?? 60 * 60)
-  const appSession = createAppSession(
-    {
-      provider: 'faceit',
-      faceit_id: profile.sub ?? profile.guid ?? profile.player_id,
-      nickname: profile.nickname,
-      email: profile.email,
-      avatar: profile.avatar,
-      iat: now,
-      exp: now + maxAge,
-    },
-    APP_SESSION_SECRET,
-  )
+  const sessionPayload = {
+    provider: 'faceit',
+    faceit_id: profile.sub ?? profile.guid ?? profile.player_id,
+    nickname: profile.nickname,
+    email: profile.email,
+    avatar: profile.avatar,
+    iat: now,
+    exp: now + maxAge,
+  }
+  const appSession = createAppSession(sessionPayload, APP_SESSION_SECRET)
 
   const response = NextResponse.redirect(new URL('/onboarding?source=faceit&status=connected', request.url))
 
