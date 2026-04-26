@@ -1,6 +1,8 @@
 'use client'
 
+import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { AnimatedBg } from '@/components/syntra/animated-bg'
 import { SyntraLogo } from '@/components/syntra/logo'
 import { ArrowLeft, Shield } from 'lucide-react'
@@ -22,11 +24,52 @@ function FaceitIcon() {
 }
 
 export default function AuthPage() {
+  const [isFaceitLoading, setIsFaceitLoading] = useState(false)
+  const router = useRouter()
+
+  useEffect(() => {
+    const onMessage = async (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return
+      if (event.data?.type !== 'faceit-auth-success') return
+
+      setIsFaceitLoading(false)
+      router.push('/onboarding?source=faceit&status=connected')
+    }
+
+    window.addEventListener('message', onMessage)
+    return () => window.removeEventListener('message', onMessage)
+  }, [router])
+
+  const startFaceitPopup = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (isFaceitLoading) {
+      event.preventDefault()
+      return
+    }
+
+    const popup = window.open(
+      '/api/auth/faceit/start?popup=1',
+      'faceit_oauth_popup',
+      'width=540,height=740,menubar=no,toolbar=no,status=no,scrollbars=yes,resizable=yes',
+    )
+
+    if (!popup) {
+      return
+    }
+
+    event.preventDefault()
+    setIsFaceitLoading(true)
+
+    const timer = window.setInterval(() => {
+      if (!popup || popup.closed) {
+        window.clearInterval(timer)
+        setIsFaceitLoading(false)
+      }
+    }, 500)
+  }
+
   return (
     <div className="relative min-h-screen bg-[#07070F] flex items-center justify-center overflow-hidden">
       <AnimatedBg />
-
-      {/* Back to home */}
       <Link
         href="/"
         className="absolute top-6 left-6 z-20 flex items-center gap-2 text-white/40 hover:text-white text-sm font-medium transition-colors duration-200"
@@ -34,8 +77,6 @@ export default function AuthPage() {
         <ArrowLeft size={15} />
         Back
       </Link>
-
-      {/* Dark blurred tactical overlay */}
       <div
         className="pointer-events-none absolute inset-0 z-5"
         style={{
@@ -44,28 +85,18 @@ export default function AuthPage() {
         }}
         aria-hidden="true"
       />
-
-      {/* Auth card */}
       <div className="relative z-10 w-full max-w-md mx-auto px-6">
         <div className="rounded-3xl border border-white/8 bg-[#0C0C1B]/90 backdrop-blur-xl p-8 shadow-[0_0_80px_rgba(124,58,237,0.12),0_32px_64px_rgba(0,0,0,0.6)]">
-          {/* Logo */}
           <div className="flex justify-center mb-8">
             <SyntraLogo iconSize={42} />
           </div>
-
-          {/* Heading */}
           <div className="text-center mb-8">
-            <h1 className="font-display text-2xl font-bold text-white mb-2">
-              Enter SYNTRA Command Center
-            </h1>
+            <h1 className="font-display text-2xl font-bold text-white mb-2">Enter SYNTRA Command Center</h1>
             <p className="text-white/45 text-sm leading-relaxed">
               Connect your gaming accounts to begin your tactical analysis.
             </p>
           </div>
-
-          {/* Auth buttons */}
           <div className="flex flex-col gap-3 mb-6">
-            {/* Steam */}
             <Link
               href="/onboarding"
               className="group flex items-center justify-center gap-3 w-full py-4 rounded-xl bg-[#1B2838] hover:bg-[#1f3248] border border-[#2a475e]/60 hover:border-[#4a90c4]/50 text-white font-semibold text-sm transition-all duration-200 shadow-[0_0_0_1px_rgba(66,133,244,0.06)]"
@@ -76,33 +107,27 @@ export default function AuthPage() {
                 <Shield size={13} className="text-[#4a90c4]" />
               </div>
             </Link>
-
-            {/* Divider */}
             <div className="flex items-center gap-3 py-1">
               <div className="flex-1 h-px bg-white/6" />
               <span className="text-white/20 text-[11px] font-mono uppercase tracking-widest">or</span>
               <div className="flex-1 h-px bg-white/6" />
             </div>
-
-            {/* FACEIT */}
-            <Link
-              href="/onboarding"
-              className="group flex items-center justify-center gap-3 w-full py-4 rounded-xl bg-violet-600 hover:bg-violet-500 border border-violet-500/30 text-white font-semibold text-sm transition-all duration-200 glow-violet-sm hover:glow-violet"
+            <a
+              href="/api/auth/faceit/start"
+              onClick={startFaceitPopup}
+              aria-disabled={isFaceitLoading}
+              className="group flex items-center justify-center gap-3 w-full py-4 rounded-xl bg-violet-600 hover:bg-violet-500 border border-violet-500/30 text-white font-semibold text-sm transition-all duration-200 glow-violet-sm hover:glow-violet aria-disabled:opacity-70 aria-disabled:cursor-not-allowed"
             >
               <FaceitIcon />
-              <span>Connect FACEIT Account</span>
+              <span>{isFaceitLoading ? 'Waiting for FACEIT…' : 'Connect FACEIT Account'}</span>
               <div className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
                 <Shield size={13} className="text-violet-200" />
               </div>
-            </Link>
+            </a>
           </div>
-
-          {/* Fine print */}
           <p className="text-center text-white/30 text-xs leading-relaxed font-mono">
             Your match history will be synchronized automatically after connection.
           </p>
-
-          {/* Trust indicators */}
           <div className="flex items-center justify-center gap-5 mt-6 pt-6 border-t border-white/5">
             {['OAuth 2.0 Secure', 'No passwords stored', 'GDPR compliant'].map((item) => (
               <div key={item} className="flex items-center gap-1.5">
@@ -112,18 +137,6 @@ export default function AuthPage() {
             ))}
           </div>
         </div>
-
-        {/* Bottom link */}
-        <p className="text-center text-white/20 text-xs font-mono mt-5">
-          By connecting, you agree to our{' '}
-          <a href="#" className="text-violet-400/60 hover:text-violet-400 transition-colors">
-            Terms of Service
-          </a>{' '}
-          and{' '}
-          <a href="#" className="text-violet-400/60 hover:text-violet-400 transition-colors">
-            Privacy Policy
-          </a>
-        </p>
       </div>
     </div>
   )
