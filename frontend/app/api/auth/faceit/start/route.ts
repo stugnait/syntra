@@ -2,9 +2,8 @@ import { createHash, randomBytes } from 'node:crypto'
 import { NextResponse } from 'next/server'
 
 const FACEIT_AUTH_ORIGIN = process.env.FACEIT_AUTH_ORIGIN ?? 'https://accounts.faceit.com/'
-const FACEIT_REDIRECT_URI =
-  process.env.FACEIT_REDIRECT_URI ??
-  'https://rotting-pebbly-waggle.ngrok-free.dev/api/auth/faceit/callback'
+const DEFAULT_REDIRECT_URI = 'https://rotting-pebbly-waggle.ngrok-free.dev/api/auth/faceit/callback'
+const FACEIT_REDIRECT_URI = process.env.FACEIT_REDIRECT_URI
 const FACEIT_CLIENT_ID = process.env.FACEIT_CLIENT_ID ?? process.env.NEXT_PUBLIC_FACEIT_CLIENT_ID
 const FACEIT_SCOPE = process.env.FACEIT_SCOPE ?? process.env.FACEIT_AUTH_URL ?? 'openid profile email'
 
@@ -33,13 +32,16 @@ export async function GET(request: Request) {
   const state = randomString(32)
   const codeChallenge = sha256(codeVerifier)
 
+  const configuredRedirectUri = FACEIT_REDIRECT_URI ?? DEFAULT_REDIRECT_URI
+
   const authUrl =
     `${FACEIT_AUTH_ORIGIN}?` +
     new URLSearchParams({
       client_id: FACEIT_CLIENT_ID,
-      redirect_uri: FACEIT_REDIRECT_URI,
-      redirect_popup: 'false',
+      redirect_uri: configuredRedirectUri,
+      redirect_popup: '0',
       response_type: 'code',
+      response_mode: 'query',
       scope: FACEIT_SCOPE,
       state,
       code_challenge: codeChallenge,
