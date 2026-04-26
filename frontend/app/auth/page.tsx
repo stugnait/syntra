@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { AnimatedBg } from '@/components/syntra/animated-bg'
@@ -96,8 +96,12 @@ export default function AuthPage() {
     return () => window.removeEventListener('message', onMessage)
   }, [router])
 
-  const startFaceitPopup = () => {
-    setIsFaceitLoading(true)
+  const startFaceitPopup = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    if (isFaceitLoading) {
+      event.preventDefault()
+      return
+    }
+
     const popup = window.open(
       '/api/auth/faceit/start?popup=1',
       'faceit_oauth_popup',
@@ -105,9 +109,11 @@ export default function AuthPage() {
     )
 
     if (!popup) {
-      window.location.href = '/api/auth/faceit/start'
       return
     }
+
+    event.preventDefault()
+    setIsFaceitLoading(true)
 
     const timer = window.setInterval(() => {
       if (!popup || popup.closed) {
@@ -162,18 +168,18 @@ export default function AuthPage() {
               <span className="text-white/20 text-[11px] font-mono uppercase tracking-widest">or</span>
               <div className="flex-1 h-px bg-white/6" />
             </div>
-            <button
-              type="button"
+            <a
+              href="/api/auth/faceit/start"
               onClick={startFaceitPopup}
-              disabled={isFaceitLoading}
-              className="group flex items-center justify-center gap-3 w-full py-4 rounded-xl bg-violet-600 hover:bg-violet-500 border border-violet-500/30 text-white font-semibold text-sm transition-all duration-200 glow-violet-sm hover:glow-violet disabled:opacity-70 disabled:cursor-not-allowed"
+              aria-disabled={isFaceitLoading}
+              className="group flex items-center justify-center gap-3 w-full py-4 rounded-xl bg-violet-600 hover:bg-violet-500 border border-violet-500/30 text-white font-semibold text-sm transition-all duration-200 glow-violet-sm hover:glow-violet aria-disabled:opacity-70 aria-disabled:cursor-not-allowed"
             >
               <FaceitIcon />
               <span>{isFaceitLoading ? 'Waiting for FACEIT…' : 'Connect FACEIT Account'}</span>
               <div className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
                 <Shield size={13} className="text-violet-200" />
               </div>
-            </button>
+            </a>
           </div>
           <p className="text-center text-white/30 text-xs leading-relaxed font-mono">
             Your match history will be synchronized automatically after connection.
