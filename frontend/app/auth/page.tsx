@@ -5,6 +5,13 @@ import { AnimatedBg } from '@/components/syntra/animated-bg'
 import { SyntraLogo } from '@/components/syntra/logo'
 import { ArrowLeft, Shield } from 'lucide-react'
 
+const FACEIT_AUTH_ORIGIN = 'https://accounts.faceit.com/'
+const FACEIT_REDIRECT_URI =
+  process.env.NEXT_PUBLIC_FACEIT_REDIRECT_URI ??
+  'https://rotting-pebbly-waggle.ngrok-free.dev/api/auth/faceit/callback'
+const FACEIT_CLIENT_ID = process.env.NEXT_PUBLIC_FACEIT_CLIENT_ID
+const FACEIT_SCOPE = process.env.NEXT_PUBLIC_FACEIT_SCOPE ?? 'openid profile email'
+
 function SteamIcon() {
   return (
     <svg viewBox="0 0 24 24" width={18} height={18} fill="currentColor" aria-hidden="true">
@@ -19,6 +26,55 @@ function FaceitIcon() {
       <path d="M2 2h9v9H2V2zm11 0h9v9h-9V2zm0 11h9v9h-9v-9zm-11 0h9v9H2v-9z" />
     </svg>
   )
+}
+
+function toBase64Url(value: ArrayBuffer) {
+  return btoa(String.fromCharCode(...new Uint8Array(value)))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
+}
+
+function randomString(byteLength = 32) {
+  const bytes = new Uint8Array(byteLength)
+  window.crypto.getRandomValues(bytes)
+  return toBase64Url(bytes.buffer)
+}
+
+async function sha256(plainText: string) {
+  const hash = await window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(plainText))
+  return toBase64Url(hash)
+}
+
+function setCookie(name: string, value: string, maxAgeSeconds: number) {
+  document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${maxAgeSeconds}; SameSite=Lax; Secure`
+}
+
+async function startFaceitAuth() {
+  if (!FACEIT_CLIENT_ID) {
+    throw new Error('Missing NEXT_PUBLIC_FACEIT_CLIENT_ID')
+  }
+
+  const codeVerifier = randomString(64)
+  const codeChallenge = await sha256(codeVerifier)
+  const state = randomString(32)
+
+  setCookie('faceit_pkce_verifier', codeVerifier, 600)
+  setCookie('faceit_oauth_state', state, 600)
+
+  const authUrl =
+    `${FACEIT_AUTH_ORIGIN}?` +
+    new URLSearchParams({
+      client_id: FACEIT_CLIENT_ID,
+      redirect_uri: FACEIT_REDIRECT_URI,
+      response_type: 'code',
+      scope: FACEIT_SCOPE,
+      state,
+      code_challenge: codeChallenge,
+      code_challenge_method: 'S256',
+    }).toString()
+
+  window.location.assign(authUrl)
 }
 
 export default function AuthPage() {
@@ -85,8 +141,9 @@ export default function AuthPage() {
             </div>
 
             {/* FACEIT */}
-            <Link
-              href="/onboarding"
+            <button
+              type="button"
+              onClick={startFaceitAuth}
               className="group flex items-center justify-center gap-3 w-full py-4 rounded-xl bg-violet-600 hover:bg-violet-500 border border-violet-500/30 text-white font-semibold text-sm transition-all duration-200 glow-violet-sm hover:glow-violet"
             >
               <FaceitIcon />
@@ -94,7 +151,7 @@ export default function AuthPage() {
               <div className="ml-auto opacity-0 group-hover:opacity-100 transition-opacity">
                 <Shield size={13} className="text-violet-200" />
               </div>
-            </Link>
+            </button>
           </div>
 
           {/* Fine print */}
