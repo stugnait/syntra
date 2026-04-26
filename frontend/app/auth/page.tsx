@@ -109,6 +109,7 @@ export default function AuthPage() {
     )
 
     if (!popup) {
+      window.location.href = '/api/auth/faceit/start?popup=1'
       return
     }
 
@@ -169,7 +170,7 @@ export default function AuthPage() {
               <div className="flex-1 h-px bg-white/6" />
             </div>
             <a
-              href="/api/auth/faceit/start"
+              href="/api/auth/faceit/start?popup=1"
               onClick={startFaceitPopup}
               aria-disabled={isFaceitLoading}
               className="group flex items-center justify-center gap-3 w-full py-4 rounded-xl bg-violet-600 hover:bg-violet-500 border border-violet-500/30 text-white font-semibold text-sm transition-all duration-200 glow-violet-sm hover:glow-violet aria-disabled:opacity-70 aria-disabled:cursor-not-allowed"

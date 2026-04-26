@@ -167,10 +167,13 @@ export async function GET(request: NextRequest) {
   const response = popupMode
     ? new NextResponse(
         `<!doctype html><html><body><script>
+const nextUrl = '/onboarding?source=faceit&status=connected';
 if (window.opener) {
   window.opener.postMessage({ type: 'faceit-auth-success' }, '${new URL(request.url).origin}');
+  window.close();
+} else {
+  window.location.replace(nextUrl);
 }
-window.close();
 </script>Authentication completed. You can close this window.</body></html>`,
         { headers: { 'content-type': 'text/html; charset=utf-8' } },
       )
