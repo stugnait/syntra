@@ -39,6 +39,8 @@ def upload_demo(request: HttpRequest) -> HttpResponse:
             demo_file=demo_file,
             status=DemoAnalysisJob.Status.PENDING,
         )
+        job.demo_file.name = f"demos/{job.id}_{demo_name}"
+        job.save(update_fields=["demo_file", "updated_at"])
     except DatabaseError:
         return JsonResponse(
             {"error": "Database is unavailable. Check DATABASE_URL and run migrations."},
