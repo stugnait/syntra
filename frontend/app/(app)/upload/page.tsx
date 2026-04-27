@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils"
 
 const MAPS = ["Mirage", "Dust2", "Inferno", "Nuke", "Ancient", "Anubis", "Vertigo", "Overpass", "Cache"]
 const SOURCES = ["FACEIT", "Steam", "ESEA", "Other"]
+const DEMO_API_BASE = process.env.NEXT_PUBLIC_DEMO_API_BASE_URL ?? ""
 
 function formatBytes(bytes: number) {
   if (bytes === 0) return "0 B"
