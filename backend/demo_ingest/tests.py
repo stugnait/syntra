@@ -140,32 +140,46 @@ class AwpyServiceTests(SimpleTestCase):
 
 
 class TaskEnqueueTests(SimpleTestCase):
-    @patch("demo_ingest.tasks.ThreadPoolExecutor")
-    def test_enqueue_upload_job_recreates_executor_after_runtime_error(self, mock_executor_cls):
+    @patch("demo_ingest.tasks.subprocess.Popen")
+    def test_enqueue_upload_job_spawns_worker_process(self, mock_popen):
         from demo_ingest import tasks
 
-        class FirstExecutor:
-            _shutdown = False
-
-            def submit(self, *_args, **_kwargs):
-                raise RuntimeError("cannot schedule new futures after interpreter shutdown")
-
-        class SecondExecutor:
-            _shutdown = False
-
-            def __init__(self):
-                self.calls = 0
-
-            def submit(self, *_args, **_kwargs):
-                self.calls += 1
-
-        second = SecondExecutor()
-        mock_executor_cls.side_effect = [FirstExecutor(), second]
-
-        tasks._EXECUTOR = None
         tasks.enqueue_upload_job("job-1", 8)
 
-        self.assertEqual(second.calls, 1)
+        self.assertTrue(mock_popen.called)
+        cmd = mock_popen.call_args.args[0]
+        self.assertIn("run_demo_job", cmd)
+        self.assertIn("--mode", cmd)
+        self.assertIn("upload", cmd)
+
+    @patch("demo_ingest.tasks.subprocess.Popen")
+    def test_enqueue_import_job_spawns_worker_process(self, mock_popen):
+        from demo_ingest import tasks
+
+        tasks.enqueue_import_job("job-2", "https://example.com/test.dem", 4)
+
+        self.assertTrue(mock_popen.called)
+        cmd = mock_popen.call_args.args[0]
+        self.assertIn("run_demo_job", cmd)
+        self.assertIn("--mode", cmd)
+        self.assertIn("import", cmd)
+        self.assertIn("--demo-url", cmd)
+
+    @patch("demo_ingest.tasks.analyze_demo_file")
+    @patch("demo_ingest.tasks.PARSING_TIMEOUT_SECONDS", 1)
+    def test_analyze_with_timeout_raises_timeout_error(self, mock_analyze):
+        from demo_ingest import tasks
+
+        def _sleepy(*_args, **_kwargs):
+            import time
+
+            time.sleep(2)
+            return {"analysis": {}}
+
+        mock_analyze.side_effect = _sleepy
+
+        with self.assertRaises(TimeoutError):
+            tasks._analyze_with_timeout(f"/tmp/{uuid4()}.dem", sample_every=8)
 
     @patch("demo_ingest.tasks.analyze_demo_file")
     @patch("demo_ingest.tasks.PARSING_TIMEOUT_SECONDS", 1)
