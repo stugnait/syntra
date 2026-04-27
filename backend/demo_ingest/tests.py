@@ -3,8 +3,9 @@ from pathlib import Path
 from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import patch
-from types import SimpleNamespace
+from uuid import uuid4
 
+from django.utils import timezone
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase, TestCase
@@ -47,6 +48,25 @@ class DemoUploadTests(TestCase):
 
         self.assertEqual(status_response.status_code, 200)
         self.assertEqual(status_response.json()["job_id"], job_id)
+
+    @override_settings(MEDIA_ROOT=tempfile.gettempdir())
+    def test_job_status_marks_stale_processing_job_as_failed(self):
+        upload = SimpleUploadedFile("match.dem", b"demo-bytes")
+        job = DemoAnalysisJob.objects.create(
+            original_filename="match.dem",
+            demo_file=upload,
+            status=DemoAnalysisJob.Status.PROCESSING,
+            result={"processing": {"stage": "parsing_demo", "progress": 40, "message": "Parsing demo with AWPY..."}},
+        )
+        DemoAnalysisJob.objects.filter(pk=job.pk).update(updated_at=timezone.now() - timezone.timedelta(minutes=20))
+
+        with patch.dict("os.environ", {"DEMO_JOB_STALE_SECONDS": "60"}):
+            status_response = self.client.get(reverse("demo_job_status", kwargs={"job_id": str(job.id)}))
+
+        self.assertEqual(status_response.status_code, 200)
+        payload = status_response.json()
+        self.assertEqual(payload["status"], DemoAnalysisJob.Status.FAILED)
+        self.assertIn("timed out", payload["error_message"])
 
 
 class DemoImportTests(TestCase):
@@ -146,6 +166,22 @@ class TaskEnqueueTests(SimpleTestCase):
         tasks.enqueue_upload_job("job-1", 8)
 
         self.assertEqual(second.calls, 1)
+
+    @patch("demo_ingest.tasks.analyze_demo_file")
+    @patch("demo_ingest.tasks.PARSING_TIMEOUT_SECONDS", 1)
+    def test_analyze_with_timeout_raises_timeout_error(self, mock_analyze):
+        from demo_ingest import tasks
+
+        def _sleepy(*_args, **_kwargs):
+            import time
+
+            time.sleep(2)
+            return {"analysis": {}}
+
+        mock_analyze.side_effect = _sleepy
+
+        with self.assertRaises(TimeoutError):
+            tasks._analyze_with_timeout(f"/tmp/{uuid4()}.dem", sample_every=8)
 
 
 @override_settings(MEDIA_ROOT=tempfile.gettempdir())
