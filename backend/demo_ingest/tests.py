@@ -1,8 +1,10 @@
 import tempfile
 from pathlib import Path
+from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase, TestCase
 from django.test.utils import override_settings
@@ -166,3 +168,24 @@ class TaskUploadRecoveryTests(TestCase):
         job.refresh_from_db()
         self.assertEqual(job.status, DemoAnalysisJob.Status.COMPLETED)
         self.assertEqual(Path(job.demo_file.name).name, existing.name)
+
+
+@override_settings(MEDIA_ROOT=tempfile.gettempdir())
+class FixDemoFilePathsCommandTests(TestCase):
+    def test_command_fixes_missing_prefixed_paths_for_failed_jobs(self):
+        existing = Path(tempfile.gettempdir()) / "demos" / "legacy-match.dem"
+        existing.parent.mkdir(parents=True, exist_ok=True)
+        existing.write_bytes(b"demo-bytes")
+
+        job = DemoAnalysisJob.objects.create(
+            original_filename="legacy-match.dem",
+            demo_file="demos/11111111-1111-1111-1111-111111111111_legacy-match.dem",
+            status=DemoAnalysisJob.Status.FAILED,
+        )
+
+        out = StringIO()
+        call_command("fix_demo_file_paths", stdout=out)
+
+        job.refresh_from_db()
+        self.assertEqual(Path(job.demo_file.name).name, "legacy-match.dem")
+        self.assertIn("[fixed]", out.getvalue())
