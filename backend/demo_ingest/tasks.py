@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import logging
+import os
+import time
+from concurrent.futures import TimeoutError as FutureTimeoutError
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Lock
@@ -11,6 +15,8 @@ from .services import AwpyUnavailableError, DemoDownloadError, analyze_demo_file
 
 _EXECUTOR: ThreadPoolExecutor | None = None
 _EXECUTOR_LOCK = Lock()
+LOGGER = logging.getLogger(__name__)
+PARSING_TIMEOUT_SECONDS = int(os.getenv("DEMO_PARSING_TIMEOUT_SECONDS", "180"))
 
 
 def _get_executor() -> ThreadPoolExecutor:
@@ -30,6 +36,34 @@ def _submit_background(fn, *args) -> None:
             global _EXECUTOR
             _EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="demo-ingest")
         _get_executor().submit(fn, *args)
+
+
+def _analyze_with_timeout(demo_path: str | Path, *, sample_every: int) -> dict:
+    parser_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="demo-parse")
+    future = parser_executor.submit(analyze_demo_file, demo_path, sample_every)
+    try:
+        return future.result(timeout=max(1, PARSING_TIMEOUT_SECONDS))
+    except FutureTimeoutError as exc:
+        future.cancel()
+        raise TimeoutError(
+            f"Demo parsing timed out after {PARSING_TIMEOUT_SECONDS}s. Please try another demo file."
+        ) from exc
+    finally:
+        parser_executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _save_job_with_retries(job: DemoAnalysisJob, *, update_fields: list[str], retries: int = 3) -> None:
+    for attempt in range(1, retries + 1):
+        try:
+            job.save(update_fields=update_fields)
+            return
+        except Exception:  # noqa: BLE001
+            LOGGER.exception("Job save failed on attempt %s/%s for job %s", attempt, retries, job.id)
+            close_old_connections()
+            if attempt < retries:
+                time.sleep(0.25)
+            else:
+                raise
 
 
 def _safe_set_status(job: DemoAnalysisJob, status: str) -> DemoAnalysisJob:
@@ -96,7 +130,7 @@ def _run_upload_job(job_id: str, sample_every: int) -> None:
         _set_processing_state(job, stage="preparing_file", progress=10, message="Preparing demo file...")
         demo_path = _recover_missing_demo_path(job)
         _set_processing_state(job, stage="parsing_demo", progress=40, message="Parsing demo with AWPY...")
-        result = analyze_demo_file(demo_path, sample_every=sample_every)
+        result = _analyze_with_timeout(demo_path, sample_every=sample_every)
         _set_processing_state(job, stage="generating_report", progress=85, message="Generating radar and report payload...")
         job.result = {
             **result,
@@ -112,12 +146,16 @@ def _run_upload_job(job_id: str, sample_every: int) -> None:
         _set_processing_state(job, stage="failed", progress=100, message=str(exc))
         job.status = DemoAnalysisJob.Status.FAILED
         job.error_message = str(exc)
+    except TimeoutError as exc:
+        _set_processing_state(job, stage="failed", progress=100, message=str(exc))
+        job.status = DemoAnalysisJob.Status.FAILED
+        job.error_message = str(exc)
     except Exception as exc:  # noqa: BLE001
         _set_processing_state(job, stage="failed", progress=100, message=f"Unexpected parser error: {exc}")
         job.status = DemoAnalysisJob.Status.FAILED
         job.error_message = f"Unexpected parser error: {exc}"
 
-    job.save(update_fields=["result", "status", "error_message", "updated_at"])
+    _save_job_with_retries(job, update_fields=["result", "status", "error_message", "updated_at"])
     close_old_connections()
 
 
@@ -134,7 +172,7 @@ def _run_import_job(job_id: str, demo_url: str, sample_every: int) -> None:
         _set_processing_state(job, stage="downloading_demo", progress=10, message="Downloading demo...")
         download_demo_file(demo_url, job.demo_file.path)
         _set_processing_state(job, stage="parsing_demo", progress=40, message="Parsing demo with AWPY...")
-        result = analyze_demo_file(job.demo_file.path, sample_every=sample_every)
+        result = _analyze_with_timeout(job.demo_file.path, sample_every=sample_every)
         _set_processing_state(job, stage="generating_report", progress=85, message="Generating radar and report payload...")
         job.result = {
             **result,
@@ -150,12 +188,16 @@ def _run_import_job(job_id: str, demo_url: str, sample_every: int) -> None:
         _set_processing_state(job, stage="failed", progress=100, message=str(exc))
         job.status = DemoAnalysisJob.Status.FAILED
         job.error_message = str(exc)
+    except TimeoutError as exc:
+        _set_processing_state(job, stage="failed", progress=100, message=str(exc))
+        job.status = DemoAnalysisJob.Status.FAILED
+        job.error_message = str(exc)
     except Exception as exc:  # noqa: BLE001
         _set_processing_state(job, stage="failed", progress=100, message=f"Unexpected parser error: {exc}")
         job.status = DemoAnalysisJob.Status.FAILED
         job.error_message = f"Unexpected parser error: {exc}"
 
-    job.save(update_fields=["result", "status", "error_message", "updated_at"])
+    _save_job_with_retries(job, update_fields=["result", "status", "error_message", "updated_at"])
     close_old_connections()
 
 
