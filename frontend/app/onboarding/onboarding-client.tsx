@@ -555,11 +555,20 @@ export default function OnboardingClient({ initialStep = 0 }: { initialStep?: nu
       </div>
 
       {/* Step content */}
-      <div className="relative z-10 flex items-center justify-center w-full">
+      <div className="relative z-10 flex flex-col items-center justify-center w-full gap-5">
         {step === 0 && <StepWelcome onNext={goNext} playerName={playerName} />}
         {step === 1 && <StepConnectFaceit onSkip={goNext} />}
         {step === 2 && <StepSync onDone={goNext} />}
         {step === 3 && <StepBaseline onEnter={handleEnterDashboard} />}
+
+        {step < 3 && (
+          <a
+            href={`/onboarding?step=${Math.min(step + 1, 3)}`}
+            className="text-xs text-white/35 hover:text-white/65 underline underline-offset-4 transition-colors"
+          >
+            Having issues? Skip this step
+          </a>
+        )}
       </div>
     </div>
   )
