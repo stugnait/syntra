@@ -11,8 +11,9 @@ from .models import DemoAnalysisJob
 
 
 class DemoUploadTests(TestCase):
+    @patch("demo_ingest.views.transaction.on_commit", side_effect=lambda fn: fn())
     @patch("demo_ingest.views.enqueue_upload_job")
-    def test_upload_creates_pending_job_and_enqueues(self, mock_enqueue):
+    def test_upload_creates_pending_job_and_enqueues(self, mock_enqueue, _mock_on_commit):
         upload = SimpleUploadedFile("match.dem", b"demo-bytes")
 
         response = self.client.post(reverse("upload_demo"), {"demo": upload, "sample_every": 4})
@@ -44,8 +45,9 @@ class DemoUploadTests(TestCase):
 
 
 class DemoImportTests(TestCase):
+    @patch("demo_ingest.views.transaction.on_commit", side_effect=lambda fn: fn())
     @patch("demo_ingest.views.enqueue_import_job")
-    def test_import_from_url_creates_pending_job(self, mock_enqueue):
+    def test_import_from_url_creates_pending_job(self, mock_enqueue, _mock_on_commit):
         response = self.client.post(
             reverse("import_demo_from_url"),
             data={"demo_url": "https://cdn.example.com/final.dem", "sample_every": 2},
