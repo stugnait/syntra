@@ -27,7 +27,8 @@ def upload_demo(request: HttpRequest) -> HttpResponse:
     if demo_file is None:
         return JsonResponse({"error": "No file provided. Use form-data key `demo`."}, status=400)
 
-    lower_name = demo_file.name.lower()
+    demo_name = demo_file.name
+    lower_name = demo_name.lower()
     if not (lower_name.endswith(".dem") or lower_name.endswith(".dem.gz")):
         return JsonResponse({"error": "Only .dem and .dem.gz files are supported."}, status=400)
 
@@ -35,7 +36,7 @@ def upload_demo(request: HttpRequest) -> HttpResponse:
 
     try:
         job = DemoAnalysisJob.objects.create(
-            original_filename=demo_file.name,
+            original_filename=demo_name,
             demo_file=demo_file,
             status=DemoAnalysisJob.Status.PENDING,
         )

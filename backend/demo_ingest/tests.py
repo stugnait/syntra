@@ -22,6 +22,7 @@ class DemoUploadTests(TestCase):
         payload = response.json()
         job = DemoAnalysisJob.objects.get(pk=payload["job_id"])
         self.assertEqual(job.status, DemoAnalysisJob.Status.PENDING)
+        self.assertEqual(job.original_filename, "match.dem")
         mock_enqueue.assert_called_once_with(str(job.id), sample_every=4)
 
     def test_upload_requires_file(self):

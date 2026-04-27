@@ -85,8 +85,19 @@ export async function uploadDemoFile(
 
     xhr.onload = () => {
       if (xhr.status < 200 || xhr.status >= 300) {
-        const fallbackText = typeof xhr.response === "string" ? xhr.response : xhr.responseText
-        reject(new Error(fallbackText || `Upload failed: ${xhr.status}`))
+        let fallbackText = ""
+        if (typeof xhr.response === "string") {
+          fallbackText = xhr.response
+        } else if (xhr.response && typeof xhr.response === "object") {
+          const errorMessage = (xhr.response as { error?: unknown }).error
+          if (typeof errorMessage === "string") {
+            fallbackText = errorMessage
+          } else {
+            fallbackText = JSON.stringify(xhr.response)
+          }
+        }
+
+        reject(new Error(fallbackText || xhr.statusText || `Upload failed: ${xhr.status}`))
         return
       }
 
