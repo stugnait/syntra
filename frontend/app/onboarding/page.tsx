@@ -1,23 +1,38 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { AnimatedBg } from '@/components/syntra/animated-bg'
 import { SyntraLogo } from '@/components/syntra/logo'
 import { BrainCircuit, ChevronRight, Target, Zap, AlertTriangle, MapPin } from 'lucide-react'
 
 // ─── Step 1: Welcome Scan ──────────────────────────────────────────
-function StepWelcome({ onNext }: { onNext: () => void }) {
+function StepWelcome({ onNext, playerName }: { onNext: () => void; playerName: string }) {
   const [scanPct, setScanPct] = useState(0)
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setScanPct((p) => {
-        if (p >= 100) { clearInterval(interval); return 100 }
-        return p + 1.4
-      })
-    }, 28)
-    return () => clearInterval(interval)
+    const durationMs = 2200
+    const startedAt = Date.now()
+
+    const intervalId = window.setInterval(() => {
+      const elapsed = Date.now() - startedAt
+      const progress = Math.min((elapsed / durationMs) * 100, 100)
+      setScanPct(progress)
+
+      if (progress >= 100) {
+        window.clearInterval(intervalId)
+      }
+    }, 50)
+
+    const hardStopId = window.setTimeout(() => {
+      setScanPct(100)
+      window.clearInterval(intervalId)
+    }, durationMs + 300)
+
+    return () => {
+      window.clearInterval(intervalId)
+      window.clearTimeout(hardStopId)
+    }
   }, [])
 
   const done = scanPct >= 100
@@ -72,7 +87,7 @@ function StepWelcome({ onNext }: { onNext: () => void }) {
 
       <div>
         <h1 className="font-display text-3xl font-bold text-white mb-2">
-          Welcome, <span className="text-gradient-violet">NightStalker</span>
+          Welcome, <span className="text-gradient-violet">{playerName}</span>
         </h1>
         <p className="text-white/45 text-sm font-mono">
           {done ? 'Profile scan complete. Ready to proceed.' : `Initializing your competitive profile… ${Math.round(scanPct)}%`}
@@ -104,7 +119,11 @@ function FaceitIcon() {
   )
 }
 
-function StepConnectFaceit({ onNext, onSkip }: { onNext: () => void; onSkip: () => void }) {
+function StepConnectFaceit({ onSkip }: { onSkip: () => void }) {
+  const handleConnect = () => {
+    window.location.href = '/api/auth/faceit/start?popup=0'
+  }
+
   return (
     <div className="flex flex-col items-center gap-8 text-center animate-slide-up max-w-sm">
       {/* FACEIT badge */}
@@ -144,7 +163,7 @@ function StepConnectFaceit({ onNext, onSkip }: { onNext: () => void; onSkip: () 
 
       <div className="flex flex-col w-full gap-3">
         <button
-          onClick={onNext}
+          onClick={handleConnect}
           className="w-full flex items-center justify-center gap-2 py-4 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-semibold text-sm transition-all duration-200 glow-violet-sm hover:glow-violet"
         >
           <FaceitIcon />
@@ -475,6 +494,7 @@ function StepDots({ current, total }: { current: number; total: number }) {
 // ─── Main Onboarding ───────────────────────────────────────────────
 export default function OnboardingPage() {
   const [step, setStep] = useState(0)
+  const [playerName, setPlayerName] = useState('Player')
   const router = useRouter()
 
   const goNext = () => setStep((s) => s + 1)
@@ -482,6 +502,32 @@ export default function OnboardingPage() {
   const handleEnterDashboard = () => {
     router.push('/dashboard')
   }
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const source = params.get('source')
+    const status = params.get('status')
+    if (source === 'faceit' && status === 'connected') {
+      setStep(2)
+    }
+  }, [])
+
+  useEffect(() => {
+    let mounted = true
+    const loadSession = async () => {
+      const response = await fetch('/api/auth/session', { cache: 'no-store' })
+      if (!response.ok) return
+      const data = await response.json() as { user?: { nickname?: string | null } }
+      if (!mounted) return
+      if (data.user?.nickname) {
+        setPlayerName(data.user.nickname)
+      }
+    }
+    loadSession()
+    return () => {
+      mounted = false
+    }
+  }, [])
 
   return (
     <div className="relative min-h-screen bg-[#07070F] flex flex-col items-center justify-center overflow-hidden px-6 py-12">
@@ -506,8 +552,8 @@ export default function OnboardingPage() {
 
       {/* Step content */}
       <div className="relative z-10 flex items-center justify-center w-full">
-        {step === 0 && <StepWelcome onNext={goNext} />}
-        {step === 1 && <StepConnectFaceit onNext={goNext} onSkip={goNext} />}
+        {step === 0 && <StepWelcome onNext={goNext} playerName={playerName} />}
+        {step === 1 && <StepConnectFaceit onSkip={goNext} />}
         {step === 2 && <StepSync onDone={goNext} />}
         {step === 3 && <StepBaseline onEnter={handleEnterDashboard} />}
       </div>
