@@ -9,6 +9,7 @@ import { BrainCircuit, ChevronRight, Target, Zap, AlertTriangle, MapPin } from '
 // ─── Step 1: Welcome Scan ──────────────────────────────────────────
 function StepWelcome({ onNext, playerName }: { onNext: () => void; playerName: string }) {
   const [scanPct, setScanPct] = useState(0)
+  const [hasAdvanced, setHasAdvanced] = useState(false)
 
   useEffect(() => {
     const durationMs = 2200
@@ -36,6 +37,15 @@ function StepWelcome({ onNext, playerName }: { onNext: () => void; playerName: s
   }, [])
 
   const done = scanPct >= 100
+
+  useEffect(() => {
+    if (!done || hasAdvanced) return
+    const autoAdvanceId = window.setTimeout(() => {
+      setHasAdvanced(true)
+      onNext()
+    }, 700)
+    return () => window.clearTimeout(autoAdvanceId)
+  }, [done, hasAdvanced, onNext])
 
   return (
     <div className="flex flex-col items-center gap-8 text-center animate-slide-up">
@@ -95,7 +105,10 @@ function StepWelcome({ onNext, playerName }: { onNext: () => void; playerName: s
       </div>
 
       <button
-        onClick={onNext}
+        onClick={() => {
+          setHasAdvanced(true)
+          onNext()
+        }}
         disabled={!done}
         className={`flex items-center gap-2 px-8 py-3.5 rounded-xl font-semibold text-sm transition-all duration-300 ${
           done
