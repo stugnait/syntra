@@ -67,22 +67,46 @@ export default function UploadPage() {
     [handleFile],
   )
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!file) return
     setUploading(true)
-    // Simulate upload progress
+    setFileError(null)
+
+    // optimistic progress while request is in-flight
     let progress = 0
     const interval = setInterval(() => {
-      progress += Math.random() * 18
-      if (progress >= 100) {
-        clearInterval(interval)
-        setUploadProgress(100)
-        // Navigate to processing screen after a short pause
-        setTimeout(() => router.push("/processing/job_demo_001"), 400)
-      } else {
-        setUploadProgress(Math.round(progress))
-      }
+      progress = Math.min(progress + Math.random() * 12, 94)
+      setUploadProgress(Math.round(progress))
     }, 180)
+
+    const formData = new FormData()
+    formData.append("demo", file)
+
+    try {
+      const response = await fetch(`/api/demos/upload/`, {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { error?: string } | null
+        throw new Error(payload?.error ?? "Upload failed.")
+      }
+
+      const payload = await response.json() as { job_id?: string }
+      if (!payload.job_id) {
+        throw new Error("Upload succeeded but no job id was returned.")
+      }
+
+      clearInterval(interval)
+      setUploadProgress(100)
+      setTimeout(() => router.push(`/processing/${payload.job_id}`), 350)
+    } catch (error) {
+      clearInterval(interval)
+      setUploading(false)
+      setUploadProgress(0)
+      setFileError(error instanceof Error ? error.message : "Failed to upload demo.")
+    }
   }
 
   return (
