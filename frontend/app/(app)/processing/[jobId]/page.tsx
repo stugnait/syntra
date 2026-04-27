@@ -29,6 +29,15 @@ const INITIAL_STEPS: Step[] = [
 // Simulates each step advancing over time
 const STEP_DELAYS = [1200, 1800, 2600, 3800, 5200, 7200] // ms at which step becomes "active"
 const STEP_DONE_EXTRA = 1100  // ms after active before marking done
+const DEMO_API_BASE = process.env.NEXT_PUBLIC_DEMO_API_BASE_URL ?? ""
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
 
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
