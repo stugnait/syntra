@@ -84,7 +84,7 @@ def _database_from_url() -> dict | None:
     parsed = urlparse(database_url)
     scheme = parsed.scheme.lower()
 
-    if scheme in {'postgres', 'postgresql'}:
+    if scheme.startswith('postgres'):
         query = parse_qs(parsed.query)
         return {
             'ENGINE': 'django.db.backends.postgresql',
@@ -104,11 +104,28 @@ def _database_from_url() -> dict | None:
             'NAME': sqlite_path,
         }
 
-    return None
+    raise RuntimeError(f'Unsupported DATABASE_URL scheme: {scheme}')
+
+
+def _database_from_parts() -> dict | None:
+    db_name = os.getenv('DB_NAME') or os.getenv('POSTGRES_DB')
+    if not db_name:
+        return None
+
+    return {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': db_name,
+        'USER': os.getenv('DB_USER') or os.getenv('POSTGRES_USER') or '',
+        'PASSWORD': os.getenv('DB_PASSWORD') or os.getenv('POSTGRES_PASSWORD') or '',
+        'HOST': os.getenv('DB_HOST') or os.getenv('POSTGRES_HOST') or '127.0.0.1',
+        'PORT': os.getenv('DB_PORT') or os.getenv('POSTGRES_PORT') or '5432',
+        'CONN_MAX_AGE': int(os.getenv('DB_CONN_MAX_AGE', '60')),
+        'OPTIONS': {'sslmode': os.getenv('DB_SSLMODE', 'prefer')},
+    }
 
 
 DATABASES = {
-    'default': _database_from_url() or {
+    'default': _database_from_url() or _database_from_parts() or {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
     }
