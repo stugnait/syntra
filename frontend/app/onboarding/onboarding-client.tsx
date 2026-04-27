@@ -20,6 +20,11 @@ type SessionResponse = {
   }
 }
 
+type FaceitDebugResponse = {
+  has_faceit_callback_debug_cookie?: boolean
+  faceit_callback_payload?: unknown
+} & Record<string, unknown>
+
 const MAX_EVENTS = 2000
 const MAX_BODY_PREVIEW = 4000
 
@@ -94,7 +99,7 @@ export default function OnboardingClient({ initialStep }: { initialStep?: number
 
   const [events, setEvents] = useState<DebugEvent[]>([])
   const [sessionPayload, setSessionPayload] = useState<SessionResponse | null>(null)
-  const [faceitPayload, setFaceitPayload] = useState<unknown>(null)
+  const [faceitPayload, setFaceitPayload] = useState<FaceitDebugResponse | null>(null)
   const [filter, setFilter] = useState('')
   const [showAutoScroll, setShowAutoScroll] = useState(true)
 
@@ -279,7 +284,7 @@ export default function OnboardingClient({ initialStep }: { initialStep?: number
 
       pushEvent('auth', 'faceit_debug_fetch_start')
       const faceitResponse = await fetch('/api/auth/debug/faceit', { cache: 'no-store' })
-      const faceitJson = await faceitResponse.json()
+      const faceitJson = (await faceitResponse.json()) as FaceitDebugResponse
       setFaceitPayload(faceitJson)
       pushEvent('auth', 'faceit_debug_fetch_done', {
         status: faceitResponse.status,
@@ -366,7 +371,7 @@ export default function OnboardingClient({ initialStep }: { initialStep?: number
           </div>
         </section>
 
-        <section className="grid md:grid-cols-2 gap-4">
+        <section className="grid md:grid-cols-3 gap-4">
           <article className="border border-green-500/30 rounded p-4 bg-black/40">
             <h2 className="font-semibold mb-2">/api/auth/session</h2>
             <pre className="text-xs whitespace-pre-wrap break-all">{stringify(sessionPayload)}</pre>
@@ -374,6 +379,12 @@ export default function OnboardingClient({ initialStep }: { initialStep?: number
           <article className="border border-green-500/30 rounded p-4 bg-black/40">
             <h2 className="font-semibold mb-2">/api/auth/debug/faceit</h2>
             <pre className="text-xs whitespace-pre-wrap break-all">{stringify(faceitPayload)}</pre>
+          </article>
+          <article className="border border-cyan-500/40 rounded p-4 bg-black/40">
+            <h2 className="font-semibold mb-2 text-cyan-300">FACEIT callback payload</h2>
+            <pre className="text-xs whitespace-pre-wrap break-all">
+              {stringify(faceitPayload?.faceit_callback_payload ?? null)}
+            </pre>
           </article>
         </section>
 
