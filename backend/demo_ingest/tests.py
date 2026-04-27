@@ -3,6 +3,7 @@ from pathlib import Path
 from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
