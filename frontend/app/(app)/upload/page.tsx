@@ -7,6 +7,7 @@ import {
   ChevronDown, Info, Zap,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { uploadDemoFile } from "@/lib/demo-api"
 
 const MAPS = ["Mirage", "Dust2", "Inferno", "Nuke", "Ancient", "Anubis", "Vertigo", "Overpass", "Cache"]
 const SOURCES = ["FACEIT", "Steam", "ESEA", "Other"]
@@ -31,6 +32,7 @@ export default function UploadPage() {
   const [notes, setNotes] = useState("")
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
   const ACCEPTED_EXTS = [".dem", ".dem.gz"]
   const MAX_BYTES = 500 * 1024 * 1024 // 500 MB
@@ -53,6 +55,7 @@ export default function UploadPage() {
       setFile(null)
     } else {
       setFileError(null)
+      setSubmitError(null)
       setFile(f)
     }
   }, [])
@@ -67,22 +70,21 @@ export default function UploadPage() {
     [handleFile],
   )
 
-  const handleSubmit = () => {
-    if (!file) return
+  const handleSubmit = async () => {
+    if (!file || uploading) return
+
     setUploading(true)
-    // Simulate upload progress
-    let progress = 0
-    const interval = setInterval(() => {
-      progress += Math.random() * 18
-      if (progress >= 100) {
-        clearInterval(interval)
-        setUploadProgress(100)
-        // Navigate to processing screen after a short pause
-        setTimeout(() => router.push("/processing/job_demo_001"), 400)
-      } else {
-        setUploadProgress(Math.round(progress))
-      }
-    }, 180)
+    setSubmitError(null)
+    setUploadProgress(0)
+
+    try {
+      const response = await uploadDemoFile(file, 8, (percent) => setUploadProgress(percent))
+      setTimeout(() => router.push(`/processing/${response.job_id}`), 250)
+    } catch (error) {
+      setUploading(false)
+      setUploadProgress(0)
+      setSubmitError(error instanceof Error ? error.message : "Upload failed")
+    }
   }
 
   return (
@@ -192,6 +194,15 @@ export default function UploadPage() {
           </div>
         )}
 
+        {submitError && (
+          <div
+            className="flex items-center gap-2.5 rounded-xl px-4 py-3 mb-4 text-sm text-red-400"
+            style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}
+          >
+            <AlertTriangle className="h-4 w-4 shrink-0" /> {submitError}
+          </div>
+        )}
+
         {/* Optional Match Info */}
         <div
           className="rounded-2xl p-5 mb-5"
@@ -264,7 +275,7 @@ export default function UploadPage() {
           >
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm font-semibold text-white">
-                {uploadProgress < 100 ? "Uploading demo..." : "Upload complete"}
+                {uploadProgress < 100 ? "Uploading demo..." : "Upload complete. Waiting for backend response..."}
               </p>
               <span className="text-sm font-bold text-violet-400">{uploadProgress}%</span>
             </div>
