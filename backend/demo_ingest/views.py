@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 
+from django.core.files.base import ContentFile
 from django.db import DatabaseError, transaction
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.utils import timezone
@@ -14,6 +15,10 @@ from .models import DemoAnalysisJob
 from .tasks import enqueue_import_job, enqueue_upload_job
 
 
+DEFAULT_SAMPLE_EVERY = 64
+DEFAULT_STALE_SECONDS = 300
+
+
 def _to_positive_int(value: object, default: int) -> int:
     try:
         parsed = int(value)
@@ -22,8 +27,16 @@ def _to_positive_int(value: object, default: int) -> int:
         return default
 
 
+def _configured_sample_every() -> int:
+    return _to_positive_int(os.getenv("DEMO_SAMPLE_EVERY", DEFAULT_SAMPLE_EVERY), DEFAULT_SAMPLE_EVERY)
+
+
+def _configured_stale_seconds() -> int:
+    return _to_positive_int(os.getenv("DEMO_JOB_STALE_SECONDS", DEFAULT_STALE_SECONDS), DEFAULT_STALE_SECONDS)
+
+
 def _mark_stale_processing_job_as_failed(job: DemoAnalysisJob) -> DemoAnalysisJob:
-    stale_seconds = _to_positive_int(os.getenv("DEMO_JOB_STALE_SECONDS", 300), 300)
+    stale_seconds = _configured_stale_seconds()
     if job.status != DemoAnalysisJob.Status.PROCESSING:
         return job
 
@@ -31,15 +44,12 @@ def _mark_stale_processing_job_as_failed(job: DemoAnalysisJob) -> DemoAnalysisJo
     if timezone.now() - job.updated_at < max_age:
         return job
 
+    message = f"Job timed out after exceeding {stale_seconds}s without updates."
     result = dict(job.result or {})
-    result["processing"] = {
-        "stage": "failed",
-        "progress": 100,
-        "message": f"Job timed out after exceeding {stale_seconds}s without updates.",
-    }
+    result["processing"] = {"stage": "failed", "progress": 100, "message": message}
     job.result = result
     job.status = DemoAnalysisJob.Status.FAILED
-    job.error_message = result["processing"]["message"]
+    job.error_message = message
     job.save(update_fields=["result", "status", "error_message", "updated_at"])
     return job
 
@@ -51,21 +61,17 @@ def upload_demo(request: HttpRequest) -> HttpResponse:
     if demo_file is None:
         return JsonResponse({"error": "No file provided. Use form-data key `demo`."}, status=400)
 
-    demo_name = demo_file.name
+    demo_name = Path(demo_file.name).name
     lower_name = demo_name.lower()
     if not (lower_name.endswith(".dem") or lower_name.endswith(".dem.gz")):
         return JsonResponse({"error": "Only .dem and .dem.gz files are supported."}, status=400)
 
-    sample_every = _to_positive_int(request.POST.get("sample_every", 8), 8)
+    sample_every = _to_positive_int(request.POST.get("sample_every", _configured_sample_every()), _configured_sample_every())
 
     try:
-        job = DemoAnalysisJob.objects.create(
-            original_filename=demo_name,
-            demo_file=demo_file,
-            status=DemoAnalysisJob.Status.PENDING,
-        )
-        job.demo_file.name = f"demos/{job.id}_{demo_name}"
-        job.save(update_fields=["demo_file", "updated_at"])
+        job = DemoAnalysisJob(original_filename=demo_name, status=DemoAnalysisJob.Status.PENDING)
+        job.demo_file.save(demo_name, demo_file, save=False)
+        job.save()
     except DatabaseError:
         return JsonResponse(
             {"error": "Database is unavailable. Check DATABASE_URL and run migrations."},
@@ -73,15 +79,7 @@ def upload_demo(request: HttpRequest) -> HttpResponse:
         )
 
     transaction.on_commit(lambda: enqueue_upload_job(str(job.id), sample_every=sample_every))
-
-    return JsonResponse(
-        {
-            "job_id": str(job.id),
-            "status": job.status,
-            "error_message": job.error_message,
-        },
-        status=201,
-    )
+    return JsonResponse({"job_id": str(job.id), "status": job.status, "error_message": job.error_message}, status=201)
 
 
 @csrf_exempt
@@ -93,7 +91,7 @@ def import_demo_from_url(request: HttpRequest) -> HttpResponse:
         return JsonResponse({"error": "Body must be valid JSON."}, status=400)
 
     demo_url = str(payload.get("demo_url", "")).strip()
-    sample_every = _to_positive_int(payload.get("sample_every", 8), 8)
+    sample_every = _to_positive_int(payload.get("sample_every", _configured_sample_every()), _configured_sample_every())
     if not demo_url:
         return JsonResponse({"error": "Field `demo_url` is required."}, status=400)
 
@@ -105,9 +103,12 @@ def import_demo_from_url(request: HttpRequest) -> HttpResponse:
         job = DemoAnalysisJob.objects.create(
             original_filename=demo_name,
             status=DemoAnalysisJob.Status.PENDING,
+            demo_file=ContentFile(b"", name=demo_name),
         )
-        job.demo_file.name = f"demos/{job.id}_{demo_name}"
-        job.save(update_fields=["demo_file", "updated_at"])
+        # keep empty placeholder content only for file path allocation; worker overwrites it.
+        if not job.demo_file.name:
+            job.demo_file.name = job.build_demo_storage_name(demo_name)
+            job.save(update_fields=["demo_file", "updated_at"])
     except DatabaseError:
         return JsonResponse(
             {"error": "Database is unavailable. Check DATABASE_URL and run migrations."},
@@ -115,15 +116,7 @@ def import_demo_from_url(request: HttpRequest) -> HttpResponse:
         )
 
     transaction.on_commit(lambda: enqueue_import_job(str(job.id), demo_url=demo_url, sample_every=sample_every))
-
-    return JsonResponse(
-        {
-            "job_id": str(job.id),
-            "status": job.status,
-            "error_message": job.error_message,
-        },
-        status=201,
-    )
+    return JsonResponse({"job_id": str(job.id), "status": job.status, "error_message": job.error_message}, status=201)
 
 
 @require_GET
@@ -131,15 +124,11 @@ def demo_job_status(request: HttpRequest, job_id: str) -> HttpResponse:
     try:
         job = DemoAnalysisJob.objects.get(pk=job_id)
     except DatabaseError:
-        return JsonResponse(
-            {"error": "Database is unavailable. Check DATABASE_URL and run migrations."},
-            status=503,
-        )
+        return JsonResponse({"error": "Database is unavailable. Check DATABASE_URL and run migrations."}, status=503)
     except DemoAnalysisJob.DoesNotExist:
         return JsonResponse({"error": "Job not found."}, status=404)
 
     job = _mark_stale_processing_job_as_failed(job)
-
     return JsonResponse(
         {
             "job_id": str(job.id),
@@ -158,32 +147,19 @@ def demo_job_radar(request: HttpRequest, job_id: str) -> HttpResponse:
     try:
         job = DemoAnalysisJob.objects.get(pk=job_id)
     except DatabaseError:
-        return JsonResponse(
-            {"error": "Database is unavailable. Check DATABASE_URL and run migrations."},
-            status=503,
-        )
+        return JsonResponse({"error": "Database is unavailable. Check DATABASE_URL and run migrations."}, status=503)
     except DemoAnalysisJob.DoesNotExist:
         return JsonResponse({"error": "Job not found."}, status=404)
 
     job = _mark_stale_processing_job_as_failed(job)
-
     if job.status != DemoAnalysisJob.Status.COMPLETED:
-        return JsonResponse(
-            {"error": "Radar is available only for completed jobs.", "status": job.status},
-            status=409,
-        )
+        return JsonResponse({"error": "Radar is available only for completed jobs.", "status": job.status}, status=409)
 
     radar = ((job.result or {}).get("analysis") or {}).get("radar")
     if not radar:
         return JsonResponse({"error": "No radar data found for this job."}, status=404)
 
-    return JsonResponse(
-        {
-            "job_id": str(job.id),
-            "original_filename": job.original_filename,
-            "radar": radar,
-        }
-    )
+    return JsonResponse({"job_id": str(job.id), "original_filename": job.original_filename, "radar": radar})
 
 
 @require_GET
@@ -191,23 +167,15 @@ def demo_job_report(request: HttpRequest, job_id: str) -> HttpResponse:
     try:
         job = DemoAnalysisJob.objects.get(pk=job_id)
     except DatabaseError:
-        return JsonResponse(
-            {"error": "Database is unavailable. Check DATABASE_URL and run migrations."},
-            status=503,
-        )
+        return JsonResponse({"error": "Database is unavailable. Check DATABASE_URL and run migrations."}, status=503)
     except DemoAnalysisJob.DoesNotExist:
         return JsonResponse({"error": "Job not found."}, status=404)
 
     job = _mark_stale_processing_job_as_failed(job)
-
     if job.status != DemoAnalysisJob.Status.COMPLETED:
-        return JsonResponse(
-            {"error": "Report is available only for completed jobs.", "status": job.status},
-            status=409,
-        )
+        return JsonResponse({"error": "Report is available only for completed jobs.", "status": job.status}, status=409)
 
-    analysis = (job.result or {}).get("analysis") or {}
-    metrics = analysis.get("metrics") or {}
+    metrics = ((job.result or {}).get("analysis") or {}).get("metrics") or {}
     if not metrics:
         return JsonResponse({"error": "No metrics found for this job."}, status=404)
 

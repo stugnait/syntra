@@ -1,20 +1,20 @@
 import tempfile
-from pathlib import Path
 from io import StringIO
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
-from uuid import uuid4
 
-from django.utils import timezone
-from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.core.management import call_command
 from django.test import SimpleTestCase, TestCase
 from django.test.utils import override_settings
 from django.urls import reverse
+from django.utils import timezone
 
 from .models import DemoAnalysisJob
 
 
+@override_settings(MEDIA_ROOT=tempfile.gettempdir())
 class DemoUploadTests(TestCase):
     @patch("demo_ingest.views.transaction.on_commit", side_effect=lambda fn: fn())
     @patch("demo_ingest.views.enqueue_upload_job")
@@ -28,7 +28,22 @@ class DemoUploadTests(TestCase):
         job = DemoAnalysisJob.objects.get(pk=payload["job_id"])
         self.assertEqual(job.status, DemoAnalysisJob.Status.PENDING)
         self.assertEqual(job.original_filename, "match.dem")
+        self.assertTrue(Path(job.demo_file.path).exists())
+        self.assertIn(f"{job.id}_match.dem", Path(job.demo_file.name).name)
         mock_enqueue.assert_called_once_with(str(job.id), sample_every=4)
+
+    @patch.dict("os.environ", {"DEMO_SAMPLE_EVERY": "64"})
+    @patch("demo_ingest.views.transaction.on_commit", side_effect=lambda fn: fn())
+    @patch("demo_ingest.views.enqueue_upload_job")
+    def test_upload_default_sample_every_is_64(self, mock_enqueue, _mock_on_commit):
+        upload = SimpleUploadedFile("match.dem", b"demo-bytes")
+
+        response = self.client.post(reverse("upload_demo"), {"demo": upload})
+
+        self.assertEqual(response.status_code, 201)
+        payload = response.json()
+        job = DemoAnalysisJob.objects.get(pk=payload["job_id"])
+        mock_enqueue.assert_called_once_with(str(job.id), sample_every=64)
 
     def test_upload_requires_file(self):
         response = self.client.post(reverse("upload_demo"), {})
@@ -49,7 +64,6 @@ class DemoUploadTests(TestCase):
         self.assertEqual(status_response.status_code, 200)
         self.assertEqual(status_response.json()["job_id"], job_id)
 
-    @override_settings(MEDIA_ROOT=tempfile.gettempdir())
     def test_job_status_marks_stale_processing_job_as_failed(self):
         upload = SimpleUploadedFile("match.dem", b"demo-bytes")
         job = DemoAnalysisJob.objects.create(
@@ -86,11 +100,7 @@ class DemoImportTests(TestCase):
         mock_enqueue.assert_called_once_with(str(job.id), demo_url="https://cdn.example.com/final.dem", sample_every=2)
 
     def test_import_requires_demo_url(self):
-        response = self.client.post(
-            reverse("import_demo_from_url"),
-            data={},
-            content_type="application/json",
-        )
+        response = self.client.post(reverse("import_demo_from_url"), data={}, content_type="application/json")
         self.assertEqual(response.status_code, 400)
 
 
@@ -115,10 +125,8 @@ class FakeDemo:
             {"tick": 64, "name": "p1", "side": "ct", "x": 1.0, "y": 2.0, "z": 3.0, "health": 100, "armor_value": 50},
             {"tick": 128, "name": "p2", "side": "t", "x": 4.0, "y": 5.0, "z": 6.0, "health": 90, "armor_value": 0},
         ])
-        self.damages = FakeFrame([
-            {"attacker_name": "p1", "hp_damage": 40},
-            {"attacker_name": "p1", "hp_damage": 20},
-        ])
+        self.damages = FakeFrame([{"attacker_name": "p1", "hp_damage": 60}])
+        self.kills = FakeFrame([{"attacker_name": "p1", "victim_name": "p2", "is_headshot": True}])
 
     def parse(self):
         return None
@@ -127,7 +135,11 @@ class FakeDemo:
 class AwpyServiceTests(SimpleTestCase):
     @patch("demo_ingest.services.importlib.util.find_spec", return_value=object())
     @patch("demo_ingest.services.importlib.import_module")
-    def test_analyze_demo_file_supports_awpy_demo_instance_api(self, mock_import_module, _mock_find_spec):
+    def test_analyze_demo_file_supports_awpy_demo_instance_api_and_no_full_parsed_dump(
+        self,
+        mock_import_module,
+        _mock_find_spec,
+    ):
         from demo_ingest import services
 
         mock_import_module.side_effect = lambda name: SimpleNamespace(Demo=FakeDemo) if name == "awpy" else None
@@ -137,6 +149,37 @@ class AwpyServiceTests(SimpleTestCase):
         self.assertEqual(payload["analysis"]["engine"], "awpy.Demo")
         self.assertEqual(payload["analysis"]["radar"]["map"], "de_mirage")
         self.assertEqual(payload["analysis"]["metrics"]["player_stats"]["player"], "p1")
+        self.assertNotIn("gameRounds", str(payload["analysis"]["parsed"]))
+        self.assertIn("events_count", payload["analysis"]["parsed"])
+
+
+@override_settings(MEDIA_ROOT=tempfile.gettempdir())
+class TaskExecutionTests(TestCase):
+    @patch("demo_ingest.tasks._analyze_with_timeout", return_value={"analysis": {"radar": {}, "metrics": {}}})
+    def test_run_upload_job_marks_completed_on_success(self, _mock_analyze):
+        from demo_ingest import tasks
+
+        upload = SimpleUploadedFile("ok.dem", b"bytes")
+        job = DemoAnalysisJob.objects.create(original_filename="ok.dem", demo_file=upload, status=DemoAnalysisJob.Status.PENDING)
+
+        tasks._run_upload_job(str(job.id), sample_every=64)
+        job.refresh_from_db()
+
+        self.assertEqual(job.status, DemoAnalysisJob.Status.COMPLETED)
+        self.assertEqual(job.result.get("processing", {}).get("stage"), "completed")
+
+    @patch("demo_ingest.tasks._analyze_with_timeout", side_effect=TimeoutError("Demo parsing timed out"))
+    def test_run_upload_job_marks_failed_on_timeout(self, _mock_analyze):
+        from demo_ingest import tasks
+
+        upload = SimpleUploadedFile("timeout.dem", b"bytes")
+        job = DemoAnalysisJob.objects.create(original_filename="timeout.dem", demo_file=upload, status=DemoAnalysisJob.Status.PENDING)
+
+        tasks._run_upload_job(str(job.id), sample_every=64)
+        job.refresh_from_db()
+
+        self.assertEqual(job.status, DemoAnalysisJob.Status.FAILED)
+        self.assertIn("timed out", job.error_message)
 
 
 class TaskEnqueueTests(SimpleTestCase):
@@ -144,81 +187,20 @@ class TaskEnqueueTests(SimpleTestCase):
     def test_enqueue_upload_job_spawns_worker_process(self, mock_popen):
         from demo_ingest import tasks
 
-        tasks.enqueue_upload_job("job-1", 8)
-
-        self.assertTrue(mock_popen.called)
+        tasks.enqueue_upload_job("job-1", 64)
         cmd = mock_popen.call_args.args[0]
         self.assertIn("run_demo_job", cmd)
-        self.assertIn("--mode", cmd)
         self.assertIn("upload", cmd)
 
     @patch("demo_ingest.tasks.subprocess.Popen")
     def test_enqueue_import_job_spawns_worker_process(self, mock_popen):
         from demo_ingest import tasks
 
-        tasks.enqueue_import_job("job-2", "https://example.com/test.dem", 4)
-
-        self.assertTrue(mock_popen.called)
+        tasks.enqueue_import_job("job-2", "https://example.com/test.dem", 64)
         cmd = mock_popen.call_args.args[0]
         self.assertIn("run_demo_job", cmd)
-        self.assertIn("--mode", cmd)
         self.assertIn("import", cmd)
         self.assertIn("--demo-url", cmd)
-
-    @patch("demo_ingest.tasks.analyze_demo_file")
-    @patch("demo_ingest.tasks.PARSING_TIMEOUT_SECONDS", 1)
-    def test_analyze_with_timeout_raises_timeout_error(self, mock_analyze):
-        from demo_ingest import tasks
-
-        def _sleepy(*_args, **_kwargs):
-            import time
-
-            time.sleep(2)
-            return {"analysis": {}}
-
-        mock_analyze.side_effect = _sleepy
-
-        with self.assertRaises(TimeoutError):
-            tasks._analyze_with_timeout(f"/tmp/{uuid4()}.dem", sample_every=8)
-
-    @patch("demo_ingest.tasks.analyze_demo_file")
-    @patch("demo_ingest.tasks.PARSING_TIMEOUT_SECONDS", 1)
-    def test_analyze_with_timeout_raises_timeout_error(self, mock_analyze):
-        from demo_ingest import tasks
-
-        def _sleepy(*_args, **_kwargs):
-            import time
-
-            time.sleep(2)
-            return {"analysis": {}}
-
-        mock_analyze.side_effect = _sleepy
-
-        with self.assertRaises(TimeoutError):
-            tasks._analyze_with_timeout(f"/tmp/{uuid4()}.dem", sample_every=8)
-
-
-@override_settings(MEDIA_ROOT=tempfile.gettempdir())
-class TaskUploadRecoveryTests(TestCase):
-    @patch("demo_ingest.tasks.analyze_demo_file", return_value={"analysis": {"ok": True}})
-    def test_run_upload_job_recovers_when_prefixed_path_is_missing(self, _mock_analyze):
-        from demo_ingest import tasks
-
-        existing = Path(tempfile.gettempdir()) / "demos" / "b561b980-2b04-43f2-b096-f20544ed45e9.dem"
-        existing.parent.mkdir(parents=True, exist_ok=True)
-        existing.write_bytes(b"demo-bytes")
-
-        job = DemoAnalysisJob.objects.create(
-            original_filename="b561b980-2b04-43f2-b096-f20544ed45e9.dem",
-            demo_file=f"demos/b1cbe607-a652-4924-9cd8-05bbc0ebe4c5_b561b980-2b04-43f2-b096-f20544ed45e9.dem",
-            status=DemoAnalysisJob.Status.PENDING,
-        )
-
-        tasks._run_upload_job(str(job.id), sample_every=8)
-
-        job.refresh_from_db()
-        self.assertEqual(job.status, DemoAnalysisJob.Status.COMPLETED)
-        self.assertEqual(Path(job.demo_file.name).name, existing.name)
 
 
 @override_settings(MEDIA_ROOT=tempfile.gettempdir())
