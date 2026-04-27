@@ -1,7 +1,8 @@
 "use client"
 
-import { use, useState, useEffect } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
+import { useParams } from "next/navigation"
 import {
   CheckCircle2, Clock, Loader2, AlertTriangle,
   FileText, ChevronRight,
@@ -126,8 +127,8 @@ function RadarAnimation({ progress }: { progress: number }) {
   )
 }
 
-export default function ProcessingPage({ params }: { params: Promise<{ jobId: string }> }) {
-  const { jobId } = use(params)
+export default function ProcessingPage() {
+  const { jobId } = useParams<{ jobId: string }>()
 
   const [steps, setSteps] = useState<Step[]>(INITIAL_STEPS)
   const [eventsExtracted, setEventsExtracted] = useState(0)
@@ -181,7 +182,7 @@ export default function ProcessingPage({ params }: { params: Promise<{ jobId: st
             {done ? "Tactical Report Ready" : "Processing Tactical Report"}
           </h1>
           <p className="text-sm text-zinc-500">
-            {done ? "Your match analysis is complete." : "Mirage demo is being analyzed — sit tight"}
+            {done ? "Your match analysis is complete." : `Demo ${jobId ?? ""} is being analyzed — sit tight`}
           </p>
         </div>
 
