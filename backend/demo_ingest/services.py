@@ -90,6 +90,149 @@ def _extract_radar_frames(parsed: Any, sample_every: int = 8) -> dict[str, Any]:
 
 
 
+
+
+def _frame_rows(frame: Any) -> list[dict[str, Any]]:
+    """Convert pandas/polars-like frame objects to list[dict]."""
+    if frame is None:
+        return []
+
+    if hasattr(frame, "to_dicts"):
+        try:
+            return frame.to_dicts()
+        except Exception:  # noqa: BLE001
+            pass
+
+    if hasattr(frame, "to_dict"):
+        try:
+            as_dict = frame.to_dict(orient="records")
+            if isinstance(as_dict, list):
+                return as_dict
+        except Exception:  # noqa: BLE001
+            try:
+                as_dict = frame.to_dict()
+                if isinstance(as_dict, list):
+                    return as_dict
+            except Exception:  # noqa: BLE001
+                pass
+
+    return []
+
+
+def _extract_demo_instance_payload(demo: Any, sample_every: int) -> dict[str, Any]:
+    rounds_rows = _frame_rows(getattr(demo, "rounds", None))
+    ticks_rows = _frame_rows(getattr(demo, "ticks", None))
+    damages_rows = _frame_rows(getattr(demo, "damages", None))
+
+    sampled_ticks: list[int] = []
+    for row in ticks_rows:
+        tick_val = row.get("tick")
+        if isinstance(tick_val, int) and tick_val not in sampled_ticks:
+            sampled_ticks.append(tick_val)
+
+    sampled_ticks = sampled_ticks[::sample_every] if sample_every > 1 else sampled_ticks
+    sampled_tick_set = set(sampled_ticks)
+
+    radar_frames: list[dict[str, Any]] = []
+    tick_to_players: dict[int, list[dict[str, Any]]] = {}
+    for row in ticks_rows:
+        tick_val = row.get("tick")
+        if not isinstance(tick_val, int) or tick_val not in sampled_tick_set:
+            continue
+
+        player = {
+            "name": row.get("name") or row.get("player_name") or row.get("steamid") or "unknown",
+            "side": row.get("side") or row.get("team_name") or row.get("team"),
+            "x": row.get("x"),
+            "y": row.get("y"),
+            "z": row.get("z"),
+            "hp": row.get("health") if row.get("health") is not None else row.get("hp"),
+            "armor": row.get("armor_value") if row.get("armor_value") is not None else row.get("armor"),
+            "is_alive": row.get("is_alive"),
+        }
+        tick_to_players.setdefault(tick_val, []).append(player)
+
+    for tick_val in sampled_ticks:
+        players = tick_to_players.get(tick_val, [])
+        if not players:
+            continue
+        first = players[0] if players else {}
+        radar_frames.append(
+            {
+                "round": first.get("round_num") or first.get("round"),
+                "tick": tick_val,
+                "clock_time": first.get("clock_time") or first.get("clockTime"),
+                "players": players,
+            }
+        )
+
+    # Player metrics from damages as a stable fallback across AWPY versions
+    player_damage: dict[str, int] = {}
+    for row in damages_rows:
+        attacker = row.get("attacker_name") or row.get("attackerName")
+        if attacker:
+            player_damage[str(attacker)] = player_damage.get(str(attacker), 0) + _safe_int(
+                row.get("hp_damage") or row.get("health_damage") or row.get("dmg_health")
+            )
+
+    top_damage_player = max(player_damage, key=player_damage.get) if player_damage else "unknown"
+    top_damage_value = player_damage.get(top_damage_player, 0)
+
+    round_timeline = [
+        {
+            "round": row.get("round_num") or row.get("roundNum"),
+            "winner_side": row.get("winner") or row.get("winningSide"),
+            "reason": row.get("end_reason") or row.get("roundEndReason"),
+            "ct_score": row.get("ct_score") or row.get("endCTScore") or row.get("ctScore"),
+            "t_score": row.get("t_score") or row.get("endTScore") or row.get("tScore"),
+        }
+        for row in rounds_rows
+    ]
+
+    final_ct = round_timeline[-1].get("ct_score") if round_timeline else None
+    final_t = round_timeline[-1].get("t_score") if round_timeline else None
+
+    demo_header = getattr(demo, "header", {}) or {}
+    if hasattr(demo_header, "to_dict"):
+        try:
+            demo_header = demo_header.to_dict()
+        except Exception:  # noqa: BLE001
+            demo_header = {}
+
+    return {
+        "radar": {
+            "map": demo_header.get("map_name") or demo_header.get("mapName") or demo_header.get("map"),
+            "sample_every": sample_every,
+            "frames": radar_frames,
+            "total_rounds": len(round_timeline),
+            "total_sampled_frames": len(radar_frames),
+        },
+        "metrics": {
+            "map": demo_header.get("map_name") or demo_header.get("mapName") or demo_header.get("map"),
+            "sample_every": sample_every,
+            "rounds": len(round_timeline),
+            "score": {"ct": final_ct, "t": final_t, "result": "unknown"},
+            "player_stats": {
+                "player": top_damage_player,
+                "kills": None,
+                "deaths": None,
+                "assists": None,
+                "kd": None,
+                "adr": None,
+                "hs_percent": None,
+                "kast": None,
+                "opening_kills": None,
+                "opening_deaths": None,
+                "flash_assists": None,
+                "utility_damage": top_damage_value,
+            },
+            "round_timeline": round_timeline,
+        },
+        "parsed": {
+            "header": _json_safe(demo_header),
+            "events_detected": _json_safe(getattr(demo, "detected_events", [])),
+        },
+    }
 def _safe_float(value: Any) -> float:
     try:
         return float(value)
@@ -192,9 +335,9 @@ def _parse_with_awpy(demo_path: Path, sample_every: int) -> dict[str, Any]:
     awpy = importlib.import_module("awpy")
 
     if hasattr(awpy, "Demo"):
-        demo = awpy.Demo(demo_path)
+        demo = awpy.Demo(Path(demo_path))
         parsed = demo.parse() if hasattr(demo, "parse") else None
-        if parsed is not None:
+        if isinstance(parsed, dict):
             return {
                 "engine": "awpy.Demo",
                 "summary": {
@@ -205,22 +348,35 @@ def _parse_with_awpy(demo_path: Path, sample_every: int) -> dict[str, Any]:
                 "parsed": _json_safe(parsed),
             }
 
-    parser_spec = importlib.util.find_spec("awpy.parser")
-    if parser_spec is not None:
-        parser_module = importlib.import_module("awpy.parser")
-        if hasattr(parser_module, "DemoParser"):
-            parser = parser_module.DemoParser(str(demo_path))
-            parsed = parser.parse() if hasattr(parser, "parse") else None
-            if parsed is not None:
-                return {
-                    "engine": "awpy.parser.DemoParser",
-                    "summary": {
-                        "type": type(parsed).__name__,
-                    },
-                    "radar": _extract_radar_frames(parsed, sample_every=sample_every),
-                    "metrics": _extract_metrics_summary(parsed, sample_every=sample_every),
-                    "parsed": _json_safe(parsed),
-                }
+        demo_payload = _extract_demo_instance_payload(demo, sample_every=sample_every)
+        if demo_payload.get("radar") or demo_payload.get("metrics"):
+            return {
+                "engine": "awpy.Demo",
+                "summary": {
+                    "type": "DemoInstance",
+                },
+                "radar": demo_payload.get("radar"),
+                "metrics": demo_payload.get("metrics"),
+                "parsed": demo_payload.get("parsed"),
+            }
+
+    demo_module_spec = importlib.util.find_spec("awpy.demo")
+    if demo_module_spec is not None:
+        demo_module = importlib.import_module("awpy.demo")
+        if hasattr(demo_module, "DemoParser"):
+            parser = demo_module.DemoParser(str(demo_path))
+            if hasattr(parser, "parse_events"):
+                parsed = parser.parse_events()
+                if parsed is not None:
+                    return {
+                        "engine": "awpy.demo.DemoParser",
+                        "summary": {
+                            "type": type(parsed).__name__,
+                        },
+                        "radar": _extract_radar_frames(parsed, sample_every=sample_every),
+                        "metrics": _extract_metrics_summary(parsed, sample_every=sample_every),
+                        "parsed": _json_safe(parsed),
+                    }
 
     raise AwpyUnavailableError("AWPY API not recognized. Update integration for your installed version.")
 

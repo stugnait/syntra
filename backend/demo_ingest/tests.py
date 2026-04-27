@@ -1,8 +1,9 @@
 from pathlib import Path
 from unittest.mock import patch
+from types import SimpleNamespace
 
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 from django.urls import reverse
 
 from .models import DemoAnalysisJob
@@ -102,3 +103,48 @@ class DemoImportTests(TestCase):
             content_type="application/json",
         )
         self.assertEqual(response.status_code, 400)
+
+
+class FakeFrame:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def to_dicts(self):
+        return self._rows
+
+
+class FakeDemo:
+    def __init__(self, path):
+        self.path = path
+        self.header = {"map_name": "de_mirage"}
+        self.detected_events = ["player_death"]
+        self.rounds = FakeFrame([
+            {"round_num": 1, "winner": "ct", "ct_score": 1, "t_score": 0},
+            {"round_num": 2, "winner": "t", "ct_score": 1, "t_score": 1},
+        ])
+        self.ticks = FakeFrame([
+            {"tick": 64, "name": "p1", "side": "ct", "x": 1.0, "y": 2.0, "z": 3.0, "health": 100, "armor_value": 50},
+            {"tick": 128, "name": "p2", "side": "t", "x": 4.0, "y": 5.0, "z": 6.0, "health": 90, "armor_value": 0},
+        ])
+        self.damages = FakeFrame([
+            {"attacker_name": "p1", "hp_damage": 40},
+            {"attacker_name": "p1", "hp_damage": 20},
+        ])
+
+    def parse(self):
+        return None
+
+
+class AwpyServiceTests(SimpleTestCase):
+    @patch("demo_ingest.services.importlib.util.find_spec", return_value=object())
+    @patch("demo_ingest.services.importlib.import_module")
+    def test_analyze_demo_file_supports_awpy_demo_instance_api(self, mock_import_module, _mock_find_spec):
+        from demo_ingest import services
+
+        mock_import_module.side_effect = lambda name: SimpleNamespace(Demo=FakeDemo) if name == "awpy" else None
+
+        payload = services.analyze_demo_file("/tmp/demo.dem", sample_every=1)
+
+        self.assertEqual(payload["analysis"]["engine"], "awpy.Demo")
+        self.assertEqual(payload["analysis"]["radar"]["map"], "de_mirage")
+        self.assertEqual(payload["analysis"]["metrics"]["player_stats"]["player"], "p1")
