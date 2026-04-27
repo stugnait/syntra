@@ -1,10 +1,10 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { NextResponse } from 'next/server'
 
-const FACEIT_AUTH_ORIGIN = process.env.FACEIT_AUTH_ORIGIN ?? 'https://accounts.faceit.com/'
+const FACEIT_AUTH_ORIGIN = process.env.FACEIT_AUTH_ORIGIN ?? 'https://accounts.faceit.com'
 const FACEIT_REDIRECT_URI = process.env.FACEIT_REDIRECT_URI
 const FACEIT_CLIENT_ID = process.env.FACEIT_CLIENT_ID ?? process.env.NEXT_PUBLIC_FACEIT_CLIENT_ID
-const FACEIT_SCOPE = process.env.FACEIT_SCOPE ?? process.env.FACEIT_AUTH_URL ?? 'openid profile email'
+const FACEIT_SCOPE = process.env.FACEIT_SCOPE ?? process.env.NEXT_PUBLIC_FACEIT_SCOPE ?? 'openid profile email'
 
 function isSecureRequest(request: Request) {
   const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim()
