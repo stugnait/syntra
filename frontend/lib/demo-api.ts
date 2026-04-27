@@ -5,6 +5,11 @@ export interface DemoJobPayload {
   status: DemoJobStatus
   error_message?: string
   result?: {
+    processing?: {
+      stage?: string
+      progress?: number
+      message?: string
+    }
     analysis?: {
       radar?: {
         total_sampled_frames?: number

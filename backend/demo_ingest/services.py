@@ -123,6 +123,7 @@ def _extract_demo_instance_payload(demo: Any, sample_every: int) -> dict[str, An
     rounds_rows = _frame_rows(getattr(demo, "rounds", None))
     ticks_rows = _frame_rows(getattr(demo, "ticks", None))
     damages_rows = _frame_rows(getattr(demo, "damages", None))
+    kills_rows = _frame_rows(getattr(demo, "kills", None))
 
     sampled_ticks: list[int] = []
     for row in ticks_rows:
@@ -166,7 +167,28 @@ def _extract_demo_instance_payload(demo: Any, sample_every: int) -> dict[str, An
             }
         )
 
-    # Player metrics from damages as a stable fallback across AWPY versions
+    # Player metrics from kills/damages as stable fallback across AWPY versions
+    kills_by_player: dict[str, int] = {}
+    deaths_by_player: dict[str, int] = {}
+    assists_by_player: dict[str, int] = {}
+    hs_by_player: dict[str, int] = {}
+    for row in kills_rows:
+        killer = row.get("attacker_name") or row.get("killer_name") or row.get("player_name")
+        victim = row.get("victim_name")
+        assister = row.get("assister_name") or row.get("assistant_name")
+        is_headshot = row.get("is_headshot") or row.get("headshot")
+        if killer:
+            key = str(killer)
+            kills_by_player[key] = kills_by_player.get(key, 0) + 1
+            if is_headshot:
+                hs_by_player[key] = hs_by_player.get(key, 0) + 1
+        if victim:
+            key = str(victim)
+            deaths_by_player[key] = deaths_by_player.get(key, 0) + 1
+        if assister:
+            key = str(assister)
+            assists_by_player[key] = assists_by_player.get(key, 0) + 1
+
     player_damage: dict[str, int] = {}
     for row in damages_rows:
         attacker = row.get("attacker_name") or row.get("attackerName")
@@ -175,8 +197,16 @@ def _extract_demo_instance_payload(demo: Any, sample_every: int) -> dict[str, An
                 row.get("hp_damage") or row.get("health_damage") or row.get("dmg_health")
             )
 
-    top_damage_player = max(player_damage, key=player_damage.get) if player_damage else "unknown"
-    top_damage_value = player_damage.get(top_damage_player, 0)
+    top_player = max(kills_by_player, key=kills_by_player.get) if kills_by_player else None
+    if top_player is None and player_damage:
+        top_player = max(player_damage, key=player_damage.get)
+    top_player = top_player or "unknown"
+    top_damage_value = player_damage.get(top_player, 0)
+    top_kills = kills_by_player.get(top_player, 0)
+    top_deaths = deaths_by_player.get(top_player, 0)
+    top_assists = assists_by_player.get(top_player, 0)
+    top_hs = hs_by_player.get(top_player, 0)
+    hs_percent = round((top_hs / top_kills) * 100, 2) if top_kills > 0 else 0.0
 
     round_timeline = [
         {
@@ -213,13 +243,13 @@ def _extract_demo_instance_payload(demo: Any, sample_every: int) -> dict[str, An
             "rounds": len(round_timeline),
             "score": {"ct": final_ct, "t": final_t, "result": "unknown"},
             "player_stats": {
-                "player": top_damage_player,
-                "kills": None,
-                "deaths": None,
-                "assists": None,
-                "kd": None,
-                "adr": None,
-                "hs_percent": None,
+                "player": top_player,
+                "kills": top_kills,
+                "deaths": top_deaths,
+                "assists": top_assists,
+                "kd": round(top_kills / top_deaths, 2) if top_deaths else float(top_kills),
+                "adr": round(top_damage_value / max(len(round_timeline), 1), 2),
+                "hs_percent": hs_percent,
                 "kast": None,
                 "opening_kills": None,
                 "opening_deaths": None,

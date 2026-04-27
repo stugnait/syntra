@@ -18,7 +18,7 @@ interface Step {
 
 const INITIAL_STEPS: Step[] = [
   { label: "Uploading demo", status: "done" },
-  { label: "Parsing events", status: "active" },
+  { label: "Preparing demo file", status: "active" },
   { label: "Extracting positions", status: "pending" },
   { label: "Calculating metrics", status: "pending" },
   { label: "Generating report", status: "pending" },
@@ -93,9 +93,20 @@ function stepsFromJob(job: DemoJobPayload | null): Step[] {
   if (job.status === "failed") return INITIAL_STEPS.map((s, idx) => ({ ...s, status: idx === 1 ? "failed" : idx === 0 ? "done" : "pending" }))
   if (job.status === "completed") return INITIAL_STEPS.map((s) => ({ ...s, status: "done" }))
 
+  const stage = job.result?.processing?.stage
+  const stageToStep: Record<string, number> = {
+    preparing_file: 1,
+    downloading_demo: 1,
+    parsing_demo: 2,
+    extracting_positions: 2,
+    calculating_metrics: 3,
+    generating_report: 4,
+  }
+  const activeIndex = stageToStep[stage ?? ""] ?? 1
+
   return INITIAL_STEPS.map((s, idx) => ({
     ...s,
-    status: idx <= 1 ? "done" : idx === 2 ? "active" : "pending",
+    status: idx < activeIndex ? "done" : idx === activeIndex ? "active" : "pending",
   }))
 }
 
@@ -142,7 +153,8 @@ export default function ProcessingPage({ params }: { params: Promise<{ jobId: st
   }, [jobId])
 
   const done = job?.status === "completed" && !!report
-  const progress = done ? 100 : job?.status === "processing" ? 65 : 20
+  const backendProgress = job?.result?.processing?.progress
+  const progress = done ? 100 : typeof backendProgress === "number" ? backendProgress : job?.status === "processing" ? 45 : 20
   const steps = stepsFromJob(job)
 
   const radarFrames = job?.result?.analysis?.radar?.total_sampled_frames ?? 0
@@ -253,7 +265,7 @@ export default function ProcessingPage({ params }: { params: Promise<{ jobId: st
             style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}
           >
             <Clock className="h-4 w-4 shrink-0" />
-            <span>Backend parser is running. This page auto-refreshes status every 2 seconds.</span>
+            <span>{job?.result?.processing?.message || "Backend parser is running. This page auto-refreshes status every 2 seconds."}</span>
           </div>
         )}
       </div>

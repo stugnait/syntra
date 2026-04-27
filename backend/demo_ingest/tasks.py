@@ -38,6 +38,17 @@ def _safe_set_status(job: DemoAnalysisJob, status: str) -> DemoAnalysisJob:
     return job
 
 
+def _set_processing_state(job: DemoAnalysisJob, *, stage: str, progress: int, message: str) -> None:
+    result = dict(job.result or {})
+    result["processing"] = {
+        "stage": stage,
+        "progress": max(0, min(100, int(progress))),
+        "message": message,
+    }
+    job.result = result
+    job.save(update_fields=["result", "updated_at"])
+
+
 def _recover_missing_demo_path(job: DemoAnalysisJob) -> Path:
     demo_path = Path(job.demo_file.path)
     if demo_path.exists():
@@ -82,15 +93,27 @@ def _run_upload_job(job_id: str, sample_every: int) -> None:
 
     try:
         _safe_set_status(job, DemoAnalysisJob.Status.PROCESSING)
+        _set_processing_state(job, stage="preparing_file", progress=10, message="Preparing demo file...")
         demo_path = _recover_missing_demo_path(job)
+        _set_processing_state(job, stage="parsing_demo", progress=40, message="Parsing demo with AWPY...")
         result = analyze_demo_file(demo_path, sample_every=sample_every)
-        job.result = result
+        _set_processing_state(job, stage="generating_report", progress=85, message="Generating radar and report payload...")
+        job.result = {
+            **result,
+            "processing": {
+                "stage": "completed",
+                "progress": 100,
+                "message": "Analysis complete.",
+            },
+        }
         job.status = DemoAnalysisJob.Status.COMPLETED
         job.error_message = ""
     except (AwpyUnavailableError, DemoDownloadError) as exc:
+        _set_processing_state(job, stage="failed", progress=100, message=str(exc))
         job.status = DemoAnalysisJob.Status.FAILED
         job.error_message = str(exc)
     except Exception as exc:  # noqa: BLE001
+        _set_processing_state(job, stage="failed", progress=100, message=f"Unexpected parser error: {exc}")
         job.status = DemoAnalysisJob.Status.FAILED
         job.error_message = f"Unexpected parser error: {exc}"
 
@@ -108,15 +131,27 @@ def _run_import_job(job_id: str, demo_url: str, sample_every: int) -> None:
 
     try:
         _safe_set_status(job, DemoAnalysisJob.Status.PROCESSING)
+        _set_processing_state(job, stage="downloading_demo", progress=10, message="Downloading demo...")
         download_demo_file(demo_url, job.demo_file.path)
+        _set_processing_state(job, stage="parsing_demo", progress=40, message="Parsing demo with AWPY...")
         result = analyze_demo_file(job.demo_file.path, sample_every=sample_every)
-        job.result = result
+        _set_processing_state(job, stage="generating_report", progress=85, message="Generating radar and report payload...")
+        job.result = {
+            **result,
+            "processing": {
+                "stage": "completed",
+                "progress": 100,
+                "message": "Analysis complete.",
+            },
+        }
         job.status = DemoAnalysisJob.Status.COMPLETED
         job.error_message = ""
     except (DemoDownloadError, AwpyUnavailableError) as exc:
+        _set_processing_state(job, stage="failed", progress=100, message=str(exc))
         job.status = DemoAnalysisJob.Status.FAILED
         job.error_message = str(exc)
     except Exception as exc:  # noqa: BLE001
+        _set_processing_state(job, stage="failed", progress=100, message=f"Unexpected parser error: {exc}")
         job.status = DemoAnalysisJob.Status.FAILED
         job.error_message = f"Unexpected parser error: {exc}"
 
