@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from django.db import DatabaseError, transaction
 from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
@@ -18,6 +20,28 @@ def _to_positive_int(value: object, default: int) -> int:
         return parsed if parsed > 0 else default
     except (TypeError, ValueError):
         return default
+
+
+def _mark_stale_processing_job_as_failed(job: DemoAnalysisJob) -> DemoAnalysisJob:
+    stale_seconds = _to_positive_int(os.getenv("DEMO_JOB_STALE_SECONDS", 300), 300)
+    if job.status != DemoAnalysisJob.Status.PROCESSING:
+        return job
+
+    max_age = timezone.timedelta(seconds=max(30, stale_seconds))
+    if timezone.now() - job.updated_at < max_age:
+        return job
+
+    result = dict(job.result or {})
+    result["processing"] = {
+        "stage": "failed",
+        "progress": 100,
+        "message": f"Job timed out after exceeding {stale_seconds}s without updates.",
+    }
+    job.result = result
+    job.status = DemoAnalysisJob.Status.FAILED
+    job.error_message = result["processing"]["message"]
+    job.save(update_fields=["result", "status", "error_message", "updated_at"])
+    return job
 
 
 @csrf_exempt
@@ -114,6 +138,8 @@ def demo_job_status(request: HttpRequest, job_id: str) -> HttpResponse:
     except DemoAnalysisJob.DoesNotExist:
         return JsonResponse({"error": "Job not found."}, status=404)
 
+    job = _mark_stale_processing_job_as_failed(job)
+
     return JsonResponse(
         {
             "job_id": str(job.id),
@@ -138,6 +164,8 @@ def demo_job_radar(request: HttpRequest, job_id: str) -> HttpResponse:
         )
     except DemoAnalysisJob.DoesNotExist:
         return JsonResponse({"error": "Job not found."}, status=404)
+
+    job = _mark_stale_processing_job_as_failed(job)
 
     if job.status != DemoAnalysisJob.Status.COMPLETED:
         return JsonResponse(
@@ -169,6 +197,8 @@ def demo_job_report(request: HttpRequest, job_id: str) -> HttpResponse:
         )
     except DemoAnalysisJob.DoesNotExist:
         return JsonResponse({"error": "Job not found."}, status=404)
+
+    job = _mark_stale_processing_job_as_failed(job)
 
     if job.status != DemoAnalysisJob.Status.COMPLETED:
         return JsonResponse(
