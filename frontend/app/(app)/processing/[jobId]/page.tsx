@@ -7,70 +7,54 @@ import {
   FileText, ChevronRight,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { getDemoJob, getDemoReport, type DemoJobPayload, type DemoReportPayload } from "@/lib/demo-api"
 
 type StepStatus = "done" | "active" | "pending" | "failed"
 
 interface Step {
   label: string
   status: StepStatus
-  detail?: string
 }
 
 const INITIAL_STEPS: Step[] = [
-  { label: "Downloading demo",      status: "pending" },
-  { label: "Decompressing file",    status: "pending" },
-  { label: "Parsing events",        status: "pending" },
-  { label: "Extracting positions",  status: "pending" },
-  { label: "Calculating metrics",   status: "pending" },
-  { label: "Generating report",     status: "pending" },
+  { label: "Uploading demo", status: "done" },
+  { label: "Parsing events", status: "active" },
+  { label: "Extracting positions", status: "pending" },
+  { label: "Calculating metrics", status: "pending" },
+  { label: "Generating report", status: "pending" },
 ]
-
-// Simulates each step advancing over time
-const STEP_DELAYS = [1200, 1800, 2600, 3800, 5200, 7200] // ms at which step becomes "active"
-const STEP_DONE_EXTRA = 1100  // ms after active before marking done
 
 function StepRow({ step, index }: { step: Step; index: number }) {
   return (
     <div className={cn("flex items-center gap-4 py-2.5 transition-opacity", step.status === "pending" && "opacity-40")}>
-      {/* Status icon */}
       <div className="w-6 flex justify-center shrink-0">
-        {step.status === "done" && (
-          <CheckCircle2 className="h-5 w-5 text-emerald-400" strokeWidth={2} />
-        )}
-        {step.status === "active" && (
-          <Loader2 className="h-5 w-5 text-violet-400 animate-spin" strokeWidth={2} />
-        )}
-        {step.status === "pending" && (
-          <div className="h-5 w-5 rounded-full border-2 border-zinc-700" />
-        )}
-        {step.status === "failed" && (
-          <AlertTriangle className="h-5 w-5 text-red-400" strokeWidth={2} />
-        )}
+        {step.status === "done" && <CheckCircle2 className="h-5 w-5 text-emerald-400" strokeWidth={2} />}
+        {step.status === "active" && <Loader2 className="h-5 w-5 text-violet-400 animate-spin" strokeWidth={2} />}
+        {step.status === "pending" && <div className="h-5 w-5 rounded-full border-2 border-zinc-700" />}
+        {step.status === "failed" && <AlertTriangle className="h-5 w-5 text-red-400" strokeWidth={2} />}
       </div>
 
-      {/* Step label */}
       <div className="flex-1 min-w-0">
         <p
           className={cn(
             "text-sm font-medium transition-colors",
-            step.status === "done"    && "text-zinc-300",
-            step.status === "active"  && "text-white font-semibold",
+            step.status === "done" && "text-zinc-300",
+            step.status === "active" && "text-white font-semibold",
             step.status === "pending" && "text-zinc-600",
-            step.status === "failed"  && "text-red-400",
+            step.status === "failed" && "text-red-400",
           )}
         >
           Step {index + 1}/{INITIAL_STEPS.length} — {step.label}
         </p>
       </div>
 
-      {/* Badge */}
       <span
         className={cn(
           "text-[10px] font-bold uppercase tracking-wider rounded-full px-2 py-0.5",
-          step.status === "done"    && "bg-emerald-500/10 text-emerald-400",
-          step.status === "active"  && "bg-violet-500/15 text-violet-300",
+          step.status === "done" && "bg-emerald-500/10 text-emerald-400",
+          step.status === "active" && "bg-violet-500/15 text-violet-300",
           step.status === "pending" && "bg-white/5 text-zinc-600",
-          step.status === "failed"  && "bg-red-500/10 text-red-400",
+          step.status === "failed" && "bg-red-500/10 text-red-400",
         )}
       >
         {step.status}
@@ -82,36 +66,14 @@ function StepRow({ step, index }: { step: Step; index: number }) {
 function RadarAnimation({ progress }: { progress: number }) {
   return (
     <div className="relative flex items-center justify-center w-48 h-48 mx-auto mb-8">
-      {/* Outer ring */}
-      <div
-        className="absolute inset-0 rounded-full"
-        style={{ border: "1px solid rgba(124,58,237,0.15)" }}
-      />
-      {/* Mid ring */}
-      <div
-        className="absolute inset-6 rounded-full"
-        style={{ border: "1px solid rgba(124,58,237,0.2)" }}
-      />
-      {/* Inner ring */}
-      <div
-        className="absolute inset-12 rounded-full"
-        style={{ border: "1px solid rgba(124,58,237,0.3)" }}
-      />
-      {/* Spinning sector */}
+      <div className="absolute inset-0 rounded-full" style={{ border: "1px solid rgba(124,58,237,0.15)" }} />
+      <div className="absolute inset-6 rounded-full" style={{ border: "1px solid rgba(124,58,237,0.2)" }} />
+      <div className="absolute inset-12 rounded-full" style={{ border: "1px solid rgba(124,58,237,0.3)" }} />
       <div
         className="absolute inset-0 rounded-full animate-radar"
-        style={{
-          background: "conic-gradient(from 0deg, transparent 70%, rgba(124,58,237,0.35) 100%)",
-        }}
+        style={{ background: "conic-gradient(from 0deg, transparent 70%, rgba(124,58,237,0.35) 100%)" }}
       />
-      {/* Reverse outer ring spin */}
-      <div
-        className="absolute inset-3 rounded-full animate-radar-reverse"
-        style={{
-          border: "1px dashed rgba(34,211,238,0.18)",
-        }}
-      />
-      {/* Center */}
+      <div className="absolute inset-3 rounded-full animate-radar-reverse" style={{ border: "1px dashed rgba(34,211,238,0.18)" }} />
       <div
         className="relative flex h-16 w-16 items-center justify-center rounded-full"
         style={{
@@ -126,76 +88,93 @@ function RadarAnimation({ progress }: { progress: number }) {
   )
 }
 
+function stepsFromJob(job: DemoJobPayload | null): Step[] {
+  if (!job) return INITIAL_STEPS
+  if (job.status === "failed") return INITIAL_STEPS.map((s, idx) => ({ ...s, status: idx === 1 ? "failed" : idx === 0 ? "done" : "pending" }))
+  if (job.status === "completed") return INITIAL_STEPS.map((s) => ({ ...s, status: "done" }))
+
+  return INITIAL_STEPS.map((s, idx) => ({
+    ...s,
+    status: idx <= 1 ? "done" : idx === 2 ? "active" : "pending",
+  }))
+}
+
 export default function ProcessingPage({ params }: { params: Promise<{ jobId: string }> }) {
   const { jobId } = use(params)
 
-  const [steps, setSteps] = useState<Step[]>(INITIAL_STEPS)
-  const [eventsExtracted, setEventsExtracted] = useState(0)
-  const [roundsProcessed, setRoundsProcessed] = useState(0)
-  const [done, setDone] = useState(false)
-  const [progress, setProgress] = useState(0)
+  const [job, setJob] = useState<DemoJobPayload | null>(null)
+  const [report, setReport] = useState<DemoReportPayload | null>(null)
+  const [error, setError] = useState<string | null>(null)
 
-  const totalRounds = 24
-  const totalEvents = 482913
-
-  // Advance steps
   useEffect(() => {
-    const timers: ReturnType<typeof setTimeout>[] = []
+    let active = true
 
-    STEP_DELAYS.forEach((delay, i) => {
-      timers.push(setTimeout(() => {
-        setSteps((prev) => prev.map((s, si) => si === i ? { ...s, status: "active" } : s))
-        setProgress(Math.round(((i) / INITIAL_STEPS.length) * 100))
+    const poll = async () => {
+      try {
+        const jobPayload = await getDemoJob(jobId)
+        if (!active) return
+        setJob(jobPayload)
 
-        timers.push(setTimeout(() => {
-          setSteps((prev) => prev.map((s, si) => si === i ? { ...s, status: "done" } : s))
-          if (i === INITIAL_STEPS.length - 1) {
-            setDone(true)
-            setProgress(100)
-            setEventsExtracted(totalEvents)
-            setRoundsProcessed(totalRounds)
-          }
-        }, STEP_DONE_EXTRA))
-      }, delay))
-    })
+        if (jobPayload.status === "completed") {
+          const reportPayload = await getDemoReport(jobId)
+          if (!active) return
+          setReport(reportPayload)
+          return
+        }
 
-    return () => timers.forEach(clearTimeout)
-  }, [])
+        if (jobPayload.status === "failed") {
+          setError(jobPayload.error_message || "Demo analysis failed")
+          return
+        }
 
-  // Animate counters
-  useEffect(() => {
-    if (done) return
-    const interval = setInterval(() => {
-      setEventsExtracted((prev) => Math.min(prev + Math.floor(Math.random() * 8000 + 2000), totalEvents))
-      setRoundsProcessed((prev) => Math.min(prev + (Math.random() > 0.85 ? 1 : 0), totalRounds))
-    }, 250)
-    return () => clearInterval(interval)
-  }, [done])
+        setTimeout(poll, 2000)
+      } catch (err) {
+        if (!active) return
+        setError(err instanceof Error ? err.message : "Could not fetch job status")
+      }
+    }
+
+    poll()
+
+    return () => {
+      active = false
+    }
+  }, [jobId])
+
+  const done = job?.status === "completed" && !!report
+  const progress = done ? 100 : job?.status === "processing" ? 65 : 20
+  const steps = stepsFromJob(job)
+
+  const radarFrames = job?.result?.analysis?.radar?.total_sampled_frames ?? 0
+  const map = report?.report.map ?? job?.result?.analysis?.metrics?.map ?? "Unknown"
+  const rounds = report?.report.rounds ?? job?.result?.analysis?.metrics?.rounds ?? 0
+  const score = report?.report.score
+  const stats = report?.report.player_stats
 
   return (
     <div className="min-h-screen p-7 pb-16 flex flex-col items-center" style={{ background: "#05050A" }}>
       <div className="w-full max-w-lg mt-8">
-        {/* Header */}
         <div className="text-center mb-8">
           <h1 className="font-display text-2xl font-black text-white tracking-tight mb-1">
             {done ? "Tactical Report Ready" : "Processing Tactical Report"}
           </h1>
           <p className="text-sm text-zinc-500">
-            {done ? "Your match analysis is complete." : "Mirage demo is being analyzed — sit tight"}
+            {done ? "Your match analysis is complete." : `Job ID: ${jobId}`}
           </p>
         </div>
 
-        {/* Radar */}
         <RadarAnimation progress={progress} />
 
-        {/* Steps card */}
-        {!done ? (
+        {error ? (
+          <div className="rounded-2xl px-6 py-4 mb-5 border border-red-500/30 bg-red-500/10 text-red-300 text-sm">
+            {error}
+          </div>
+        ) : !done ? (
           <div
             className="rounded-2xl px-6 py-4 mb-5 divide-y"
             style={{
               background: "rgba(255,255,255,0.025)",
               border: "1px solid rgba(255,255,255,0.07)",
-              divideColor: "rgba(255,255,255,0.05)",
             }}
           >
             {steps.map((step, i) => (
@@ -215,15 +194,15 @@ export default function ProcessingPage({ params }: { params: Promise<{ jobId: st
               <CheckCircle2 className="h-6 w-6 text-emerald-400" strokeWidth={2} />
               <div>
                 <p className="text-sm font-bold text-white">All steps complete</p>
-                <p className="text-xs text-zinc-500">Report generated in 8.3 seconds</p>
+                <p className="text-xs text-zinc-500">Parsed with backend AWPY pipeline</p>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               {[
-                { label: "Grade", value: "A-", color: "#a78bfa" },
-                { label: "Map",   value: "Mirage", color: "#22D3EE" },
-                { label: "Result",value: "13 : 9 Win", color: "#34D399" },
-                { label: "K/D",   value: "1.47", color: "#F59E0B" },
+                { label: "Map", value: map || "-", color: "#22D3EE" },
+                { label: "Score", value: score ? `${score.ct ?? "?"}:${score.t ?? "?"}` : "-", color: "#34D399" },
+                { label: "K/D", value: stats?.kd !== undefined ? String(stats.kd) : "-", color: "#F59E0B" },
+                { label: "ADR", value: stats?.adr !== undefined ? String(stats.adr) : "-", color: "#A78BFA" },
               ].map(({ label, value, color }) => (
                 <div
                   key={label}
@@ -238,15 +217,11 @@ export default function ProcessingPage({ params }: { params: Promise<{ jobId: st
           </div>
         )}
 
-        {/* Live counters */}
-        {!done && (
-          <div
-            className="grid grid-cols-2 gap-3 mb-5"
-            style={{}}
-          >
+        {!done && !error && (
+          <div className="grid grid-cols-2 gap-3 mb-5">
             {[
-              { label: "Events extracted", value: eventsExtracted.toLocaleString() },
-              { label: "Rounds processed", value: `${roundsProcessed} / ${totalRounds}` },
+              { label: "Sampled radar frames", value: radarFrames.toLocaleString() },
+              { label: "Rounds parsed", value: rounds ? String(rounds) : "processing..." },
             ].map(({ label, value }) => (
               <div
                 key={label}
@@ -260,10 +235,9 @@ export default function ProcessingPage({ params }: { params: Promise<{ jobId: st
           </div>
         )}
 
-        {/* CTA */}
         {done ? (
           <Link
-            href="/matches/m1"
+            href={`/matches/m1?jobId=${jobId}`}
             className="flex w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-sm font-bold text-white transition-all hover:opacity-90"
             style={{
               background: "linear-gradient(135deg, #7C3AED, #5B21B6)",
@@ -279,7 +253,7 @@ export default function ProcessingPage({ params }: { params: Promise<{ jobId: st
             style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.07)" }}
           >
             <Clock className="h-4 w-4 shrink-0" />
-            <span>Processing typically takes 15–90 seconds depending on demo size and server load. You can leave this page — we will notify you when it is ready.</span>
+            <span>Backend parser is running. This page auto-refreshes status every 2 seconds.</span>
           </div>
         )}
       </div>
