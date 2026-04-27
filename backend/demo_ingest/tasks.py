@@ -1,13 +1,34 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from threading import Lock
 
 from django.db import close_old_connections
 
 from .models import DemoAnalysisJob
 from .services import AwpyUnavailableError, DemoDownloadError, analyze_demo_file, download_demo_file
 
-_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="demo-ingest")
+_EXECUTOR: ThreadPoolExecutor | None = None
+_EXECUTOR_LOCK = Lock()
+
+
+def _get_executor() -> ThreadPoolExecutor:
+    global _EXECUTOR
+    with _EXECUTOR_LOCK:
+        if _EXECUTOR is None or getattr(_EXECUTOR, "_shutdown", False):
+            _EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="demo-ingest")
+        return _EXECUTOR
+
+
+def _submit_background(fn, *args) -> None:
+    try:
+        _get_executor().submit(fn, *args)
+    except RuntimeError:
+        # Happens during code reload/interpreter transitions in dev mode.
+        with _EXECUTOR_LOCK:
+            global _EXECUTOR
+            _EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="demo-ingest")
+        _get_executor().submit(fn, *args)
 
 
 def _safe_set_status(job: DemoAnalysisJob, status: str) -> DemoAnalysisJob:
@@ -68,8 +89,8 @@ def _run_import_job(job_id: str, demo_url: str, sample_every: int) -> None:
 
 
 def enqueue_upload_job(job_id: str, sample_every: int) -> None:
-    _EXECUTOR.submit(_run_upload_job, job_id, sample_every)
+    _submit_background(_run_upload_job, job_id, sample_every)
 
 
 def enqueue_import_job(job_id: str, demo_url: str, sample_every: int) -> None:
-    _EXECUTOR.submit(_run_import_job, job_id, demo_url, sample_every)
+    _submit_background(_run_import_job, job_id, demo_url, sample_every)

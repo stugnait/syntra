@@ -112,3 +112,32 @@ class AwpyServiceTests(SimpleTestCase):
         self.assertEqual(payload["analysis"]["engine"], "awpy.Demo")
         self.assertEqual(payload["analysis"]["radar"]["map"], "de_mirage")
         self.assertEqual(payload["analysis"]["metrics"]["player_stats"]["player"], "p1")
+
+
+class TaskEnqueueTests(SimpleTestCase):
+    @patch("demo_ingest.tasks.ThreadPoolExecutor")
+    def test_enqueue_upload_job_recreates_executor_after_runtime_error(self, mock_executor_cls):
+        from demo_ingest import tasks
+
+        class FirstExecutor:
+            _shutdown = False
+
+            def submit(self, *_args, **_kwargs):
+                raise RuntimeError("cannot schedule new futures after interpreter shutdown")
+
+        class SecondExecutor:
+            _shutdown = False
+
+            def __init__(self):
+                self.calls = 0
+
+            def submit(self, *_args, **_kwargs):
+                self.calls += 1
+
+        second = SecondExecutor()
+        mock_executor_cls.side_effect = [FirstExecutor(), second]
+
+        tasks._EXECUTOR = None
+        tasks.enqueue_upload_job("job-1", 8)
+
+        self.assertEqual(second.calls, 1)
