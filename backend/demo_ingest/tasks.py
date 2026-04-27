@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import logging
-import multiprocessing as mp
+import multiprocessing
 import os
+import queue
 import subprocess
 import sys
 import time
@@ -19,16 +20,33 @@ LOGGER = logging.getLogger(__name__)
 PARSING_TIMEOUT_SECONDS = int(os.getenv("DEMO_PARSING_TIMEOUT_SECONDS", "180"))
 
 
-def _analyze_worker(demo_path: str, sample_every: int, queue: mp.Queue) -> None:
+def _parser_process_entrypoint(demo_path: str, sample_every: int, output_queue) -> None:
     try:
-        queue.put(("ok", analyze_demo_file(demo_path, sample_every=sample_every)))
-    except Exception as exc:  # noqa: BLE001
-        queue.put(("err", {"message": str(exc), "traceback": traceback.format_exc()}))
+        result = analyze_demo_file(demo_path, sample_every=sample_every)
+        output_queue.put(
+            {
+                "ok": True,
+                "result": result,
+            }
+        )
+    except BaseException:  # noqa: BLE001
+        output_queue.put(
+            {
+                "ok": False,
+                "error": traceback.format_exc(),
+            }
+        )
+        raise
 
 
 def _analyze_with_timeout(demo_path: str | Path, *, sample_every: int) -> dict:
-    queue: mp.Queue = mp.Queue(maxsize=1)
-    process = mp.Process(target=_analyze_worker, args=(str(demo_path), sample_every, queue), daemon=True)
+    ctx = multiprocessing.get_context("spawn")
+    output_queue = ctx.Queue()
+    process = ctx.Process(
+        target=_parser_process_entrypoint,
+        args=(str(demo_path), int(sample_every), output_queue),
+        daemon=False,
+    )
     process.start()
     process.join(timeout=max(1, PARSING_TIMEOUT_SECONDS))
 
@@ -37,19 +55,28 @@ def _analyze_with_timeout(demo_path: str | Path, *, sample_every: int) -> dict:
         process.join(timeout=5)
         if process.is_alive():
             process.kill()
-            process.join(timeout=2)
-        raise TimeoutError(
-            f"Demo parsing timed out after {PARSING_TIMEOUT_SECONDS}s and was forcefully terminated."
+            process.join(timeout=5)
+        raise TimeoutError(f"Demo parsing timed out after {PARSING_TIMEOUT_SECONDS}s.")
+
+    payload = None
+    try:
+        payload = output_queue.get_nowait()
+    except queue.Empty:
+        pass
+
+    if payload and payload.get("ok"):
+        return payload["result"]
+
+    if payload and not payload.get("ok"):
+        raise RuntimeError(payload.get("error") or "Parser process failed without traceback.")
+
+    if process.exitcode != 0:
+        raise RuntimeError(
+            f"Parser process exited unexpectedly with code {process.exitcode}. "
+            "No traceback was returned from child process."
         )
 
-    if queue.empty():
-        raise RuntimeError(f"Parser process exited unexpectedly with code {process.exitcode}.")
-
-    status, payload = queue.get_nowait()
-    if status == "ok":
-        return payload
-
-    raise RuntimeError(f"Demo parsing failed: {payload.get('message')}\n{payload.get('traceback', '')}")
+    raise RuntimeError("Parser process finished without returning result.")
 
 
 def _save_job_with_retries(job: DemoAnalysisJob, *, update_fields: list[str], retries: int = 3) -> None:
