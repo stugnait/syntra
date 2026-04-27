@@ -6,13 +6,13 @@ const FACEIT_OIDC_CONFIG_URL =
   process.env.FACEIT_OIDC_CONFIG_URL ?? 'https://api.faceit.com/auth/v1/openid_configuration'
 const FACEIT_TOKEN_URL = process.env.FACEIT_TOKEN_URL
 const FACEIT_USERINFO_URL = process.env.FACEIT_USERINFO_URL
-const FACEIT_REDIRECT_URI =
-  process.env.FACEIT_REDIRECT_URI ??
-  'https://rotting-pebbly-waggle.ngrok-free.dev/api/auth/faceit/callback'
+const FACEIT_REDIRECT_URI = process.env.FACEIT_REDIRECT_URI
 const FACEIT_CLIENT_ID = process.env.FACEIT_CLIENT_ID
 const FACEIT_CLIENT_SECRET = process.env.FACEIT_CLIENT_SECRET
-const APP_SESSION_SECRET = process.env.APP_SESSION_SECRET
-const APP_ORIGIN = process.env.APP_ORIGIN ?? new URL(FACEIT_REDIRECT_URI).origin
+const APP_SESSION_SECRET =
+  process.env.APP_SESSION_SECRET ??
+  process.env.FACEIT_CLIENT_SECRET ??
+  'syntra-dev-session-secret-change-me'
 
 type OidcConfig = {
   token_endpoint?: string
@@ -73,13 +73,41 @@ async function resolveOidcEndpoints() {
   }
 }
 
+function isSecureRequest(request: NextRequest) {
+  const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim()
+  if (forwardedProto === 'https') {
+    return true
+  }
+
+  if (request.nextUrl.protocol === 'https:') {
+    return true
+  }
+
+  return false
+}
+
+function resolveRequestOrigin(request: NextRequest) {
+  const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim()
+  const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim()
+  if (forwardedProto && forwardedHost) {
+    return `${forwardedProto}://${forwardedHost}`
+  }
+
+  return request.nextUrl.origin
+}
+
 export async function GET(request: NextRequest) {
+  const requestOrigin = resolveRequestOrigin(request)
+  const appOrigin = process.env.APP_ORIGIN ?? requestOrigin
+  const redirectUri = FACEIT_REDIRECT_URI ?? `${requestOrigin}/api/auth/faceit/callback`
+  const secureCookie = isSecureRequest(request)
+
   const query = request.nextUrl.searchParams
   const code = query.get('code')
   const state = query.get('state')
 
   if (!code || !state) {
-    return NextResponse.redirect(new URL('/auth?error=missing_oauth_params', APP_ORIGIN))
+    return NextResponse.redirect(new URL('/auth?error=missing_oauth_params', appOrigin))
   }
 
   const cookieStore = await cookies()
@@ -88,22 +116,18 @@ export async function GET(request: NextRequest) {
   const popupMode = cookieStore.get('faceit_popup_mode')?.value === '1'
 
   if (!expectedState || !codeVerifier || state !== expectedState) {
-    return NextResponse.redirect(new URL('/auth?error=invalid_oauth_state', APP_ORIGIN))
+    return NextResponse.redirect(new URL('/auth?error=invalid_oauth_state', appOrigin))
   }
 
   if (!FACEIT_CLIENT_ID) {
-    return NextResponse.redirect(new URL('/auth?error=missing_faceit_client_id', APP_ORIGIN))
-  }
-
-  if (!APP_SESSION_SECRET) {
-    return NextResponse.redirect(new URL('/auth?error=missing_app_session_secret', APP_ORIGIN))
+    return NextResponse.redirect(new URL('/auth?error=missing_faceit_client_id', appOrigin))
   }
 
   let endpoints: { tokenUrl: string; userInfoUrl: string }
   try {
     endpoints = await resolveOidcEndpoints()
   } catch {
-    return NextResponse.redirect(new URL('/auth?error=faceit_discovery_failed', APP_ORIGIN))
+    return NextResponse.redirect(new URL('/auth?error=faceit_discovery_failed', appOrigin))
   }
 
   const headers: HeadersInit = {
@@ -120,7 +144,7 @@ export async function GET(request: NextRequest) {
     body: new URLSearchParams({
       grant_type: 'authorization_code',
       code,
-      redirect_uri: FACEIT_REDIRECT_URI,
+      redirect_uri: redirectUri,
       client_id: FACEIT_CLIENT_ID,
       code_verifier: codeVerifier,
     }),
@@ -128,7 +152,7 @@ export async function GET(request: NextRequest) {
   })
 
   if (!tokenResponse.ok) {
-    return NextResponse.redirect(new URL('/auth?error=faceit_token_exchange_failed', APP_ORIGIN))
+    return NextResponse.redirect(new URL('/auth?error=faceit_token_exchange_failed', appOrigin))
   }
 
   const tokenData = (await tokenResponse.json()) as {
@@ -137,7 +161,7 @@ export async function GET(request: NextRequest) {
   }
 
   if (!tokenData.access_token) {
-    return NextResponse.redirect(new URL('/auth?error=faceit_access_token_missing', APP_ORIGIN))
+    return NextResponse.redirect(new URL('/auth?error=faceit_access_token_missing', appOrigin))
   }
 
   const profileResponse = await fetch(endpoints.userInfoUrl, {
@@ -148,7 +172,7 @@ export async function GET(request: NextRequest) {
   })
 
   if (!profileResponse.ok) {
-    return NextResponse.redirect(new URL('/auth?error=faceit_profile_fetch_failed', APP_ORIGIN))
+    return NextResponse.redirect(new URL('/auth?error=faceit_profile_fetch_failed', appOrigin))
   }
 
   const profile = (await profileResponse.json()) as FaceitProfile
@@ -170,7 +194,7 @@ export async function GET(request: NextRequest) {
         `<!doctype html><html><body><script>
 const nextUrl = '/onboarding?source=faceit&status=connected';
 if (window.opener) {
-  window.opener.postMessage({ type: 'faceit-auth-success' }, '${APP_ORIGIN}');
+  window.opener.postMessage({ type: 'faceit-auth-success' }, '${appOrigin}');
   window.close();
 } else {
   window.location.replace(nextUrl);
@@ -178,7 +202,7 @@ if (window.opener) {
 </script>Authentication completed. You can close this window.</body></html>`,
         { headers: { 'content-type': 'text/html; charset=utf-8' } },
       )
-    : NextResponse.redirect(new URL('/onboarding?source=faceit&status=connected', APP_ORIGIN))
+    : NextResponse.redirect(new URL('/onboarding?source=faceit&status=connected', appOrigin))
 
   response.cookies.set('faceit_oauth_state', '', { maxAge: 0, path: '/' })
   response.cookies.set('faceit_pkce_verifier', '', { maxAge: 0, path: '/' })
@@ -187,14 +211,14 @@ if (window.opener) {
     path: '/',
     maxAge,
     sameSite: 'lax',
-    secure: true,
+    secure: secureCookie,
     httpOnly: true,
   })
   response.cookies.set('faceit_profile', encodeURIComponent(JSON.stringify(profile)), {
     path: '/',
     maxAge,
     sameSite: 'lax',
-    secure: true,
+    secure: secureCookie,
     httpOnly: true,
   })
 

@@ -7,13 +7,6 @@ const APP_SESSION_SECRET =
   process.env.FACEIT_CLIENT_SECRET ??
   'syntra-dev-session-secret-change-me'
 
-type SessionPayload = {
-  provider?: string
-  nickname?: string
-  avatar?: string
-  exp?: number
-}
-
 function fromBase64Url(value: string) {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
   const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4)
@@ -38,33 +31,37 @@ function verifySession(token: string, secret: string) {
   const valid = timingSafeEqual(actualBuffer, expectedBuffer)
   if (!valid) return null
 
-  return JSON.parse(fromBase64Url(body)) as SessionPayload
+  return JSON.parse(fromBase64Url(body)) as Record<string, unknown>
 }
 
 export async function GET() {
+  if (process.env.NODE_ENV === 'production') {
+    return NextResponse.json({ error: 'Disabled in production' }, { status: 404 })
+  }
+
   const cookieStore = await cookies()
-  const session = cookieStore.get('syntra_session')?.value
-  const secret = APP_SESSION_SECRET
+  const sessionToken = cookieStore.get('syntra_session')?.value
+  const faceitProfileRaw = cookieStore.get('faceit_profile')?.value
 
-  if (!session || !secret) {
-    return NextResponse.json({ authenticated: false }, { status: 401 })
+  let sessionPayload: Record<string, unknown> | null = null
+  if (sessionToken) {
+    sessionPayload = verifySession(sessionToken, APP_SESSION_SECRET)
   }
 
-  const payload = verifySession(session, secret)
-  if (!payload) {
-    return NextResponse.json({ authenticated: false }, { status: 401 })
-  }
-
-  if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) {
-    return NextResponse.json({ authenticated: false }, { status: 401 })
+  let faceitProfile: Record<string, unknown> | null = null
+  if (faceitProfileRaw) {
+    try {
+      faceitProfile = JSON.parse(decodeURIComponent(faceitProfileRaw)) as Record<string, unknown>
+    } catch {
+      faceitProfile = null
+    }
   }
 
   return NextResponse.json({
-    authenticated: true,
-    user: {
-      provider: payload.provider ?? null,
-      nickname: payload.nickname ?? null,
-      avatar: payload.avatar ?? null,
-    },
+    has_session_cookie: Boolean(sessionToken),
+    has_faceit_profile_cookie: Boolean(faceitProfileRaw),
+    session_payload: sessionPayload,
+    faceit_profile: faceitProfile,
   })
 }
+

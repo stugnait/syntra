@@ -2,11 +2,33 @@ import { createHash, randomBytes } from 'node:crypto'
 import { NextResponse } from 'next/server'
 
 const FACEIT_AUTH_ORIGIN = process.env.FACEIT_AUTH_ORIGIN ?? 'https://accounts.faceit.com/'
-const DEFAULT_REDIRECT_URI = 'https://rotting-pebbly-waggle.ngrok-free.dev/api/auth/faceit/callback'
 const FACEIT_REDIRECT_URI = process.env.FACEIT_REDIRECT_URI
 const FACEIT_CLIENT_ID = process.env.FACEIT_CLIENT_ID ?? process.env.NEXT_PUBLIC_FACEIT_CLIENT_ID
 const FACEIT_SCOPE = process.env.FACEIT_SCOPE ?? process.env.FACEIT_AUTH_URL ?? 'openid profile email'
-const APP_ORIGIN = process.env.APP_ORIGIN ?? new URL(FACEIT_REDIRECT_URI ?? DEFAULT_REDIRECT_URI).origin
+
+function isSecureRequest(request: Request) {
+  const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim()
+  if (forwardedProto === 'https') {
+    return true
+  }
+
+  const url = new URL(request.url)
+  if (url.protocol === 'https:') {
+    return true
+  }
+
+  return false
+}
+
+function resolveRequestOrigin(request: Request) {
+  const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim()
+  const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim()
+  if (forwardedProto && forwardedHost) {
+    return `${forwardedProto}://${forwardedHost}`
+  }
+
+  return new URL(request.url).origin
+}
 
 function toBase64Url(value: Buffer) {
   return value
@@ -25,15 +47,19 @@ function sha256(value: string) {
 }
 
 export async function GET(request: Request) {
+  const requestOrigin = resolveRequestOrigin(request)
+  const appOrigin = process.env.APP_ORIGIN ?? requestOrigin
+
   if (!FACEIT_CLIENT_ID) {
-    return NextResponse.redirect(new URL('/auth?error=missing_faceit_client_id', APP_ORIGIN))
+    return NextResponse.redirect(new URL('/auth?error=missing_faceit_client_id', appOrigin))
   }
 
   const codeVerifier = randomString(64)
   const state = randomString(32)
   const codeChallenge = sha256(codeVerifier)
 
-  const configuredRedirectUri = FACEIT_REDIRECT_URI ?? DEFAULT_REDIRECT_URI
+  const configuredRedirectUri = FACEIT_REDIRECT_URI ?? `${requestOrigin}/api/auth/faceit/callback`
+  const secureCookie = isSecureRequest(request)
 
   const popupParam = new URL(request.url).searchParams.get('popup')
   const popupMode = popupParam !== '0'
@@ -58,21 +84,21 @@ export async function GET(request: Request) {
     path: '/',
     maxAge: 60 * 10,
     sameSite: 'lax',
-    secure: true,
+    secure: secureCookie,
     httpOnly: true,
   })
   response.cookies.set('faceit_popup_mode', popupMode ? '1' : '0', {
     path: '/',
     maxAge: 60 * 10,
     sameSite: 'lax',
-    secure: true,
+    secure: secureCookie,
     httpOnly: true,
   })
   response.cookies.set('faceit_pkce_verifier', codeVerifier, {
     path: '/',
     maxAge: 60 * 10,
     sameSite: 'lax',
-    secure: true,
+    secure: secureCookie,
     httpOnly: true,
   })
 
