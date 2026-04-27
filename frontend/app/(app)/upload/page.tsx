@@ -75,11 +75,10 @@ export default function UploadPage() {
 
     setUploading(true)
     setSubmitError(null)
-    setUploadProgress(15)
+    setUploadProgress(0)
 
     try {
-      const response = await uploadDemoFile(file, 8)
-      setUploadProgress(100)
+      const response = await uploadDemoFile(file, 8, (percent) => setUploadProgress(percent))
       setTimeout(() => router.push(`/processing/${response.job_id}`), 250)
     } catch (error) {
       setUploading(false)
@@ -276,7 +275,7 @@ export default function UploadPage() {
           >
             <div className="flex items-center justify-between mb-2">
               <p className="text-sm font-semibold text-white">
-                {uploadProgress < 100 ? "Uploading demo..." : "Upload complete"}
+                {uploadProgress < 100 ? "Uploading demo..." : "Upload complete. Waiting for backend response..."}
               </p>
               <span className="text-sm font-bold text-violet-400">{uploadProgress}%</span>
             </div>

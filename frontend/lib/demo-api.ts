@@ -59,22 +59,49 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
-export async function uploadDemoFile(demoFile: File, sampleEvery = 8): Promise<DemoJobPayload> {
+export async function uploadDemoFile(
+  demoFile: File,
+  sampleEvery = 8,
+  onProgress?: (percent: number) => void,
+): Promise<DemoJobPayload> {
   const formData = new FormData()
   formData.append("demo", demoFile)
   formData.append("sample_every", String(sampleEvery))
 
-  const res = await fetch(`${API_BASE}/api/demos/upload/`, {
-    method: "POST",
-    body: formData,
+  return new Promise<DemoJobPayload>((resolve, reject) => {
+    const xhr = new XMLHttpRequest()
+    xhr.open("POST", `${API_BASE}/api/demos/upload/`)
+    xhr.responseType = "json"
+
+    xhr.upload.onloadstart = () => onProgress?.(1)
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return
+      const percent = Math.min(100, Math.round((event.loaded / event.total) * 100))
+      onProgress?.(percent)
+    }
+
+    xhr.onerror = () => reject(new Error("Network error during demo upload"))
+
+    xhr.onload = () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const fallbackText = typeof xhr.response === "string" ? xhr.response : xhr.responseText
+        reject(new Error(fallbackText || `Upload failed: ${xhr.status}`))
+        return
+      }
+
+      const payload = xhr.response as DemoJobPayload | null
+      if (!payload || !payload.job_id) {
+        reject(new Error("Upload succeeded but response payload is invalid"))
+        return
+      }
+
+      onProgress?.(100)
+      resolve(payload)
+    }
+
+    xhr.send(formData)
   })
-
-  if (!res.ok) {
-    const text = await res.text()
-    throw new Error(text || `Upload failed: ${res.status}`)
-  }
-
-  return res.json() as Promise<DemoJobPayload>
 }
 
 export function getDemoJob(jobId: string): Promise<DemoJobPayload> {
