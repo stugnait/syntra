@@ -1,10 +1,14 @@
+import tempfile
 from pathlib import Path
+from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import patch
 from types import SimpleNamespace
 
+from django.core.management import call_command
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import SimpleTestCase, TestCase
+from django.test.utils import override_settings
 from django.urls import reverse
 
 from .models import DemoAnalysisJob
@@ -142,3 +146,47 @@ class TaskEnqueueTests(SimpleTestCase):
         tasks.enqueue_upload_job("job-1", 8)
 
         self.assertEqual(second.calls, 1)
+
+
+@override_settings(MEDIA_ROOT=tempfile.gettempdir())
+class TaskUploadRecoveryTests(TestCase):
+    @patch("demo_ingest.tasks.analyze_demo_file", return_value={"analysis": {"ok": True}})
+    def test_run_upload_job_recovers_when_prefixed_path_is_missing(self, _mock_analyze):
+        from demo_ingest import tasks
+
+        existing = Path(tempfile.gettempdir()) / "demos" / "b561b980-2b04-43f2-b096-f20544ed45e9.dem"
+        existing.parent.mkdir(parents=True, exist_ok=True)
+        existing.write_bytes(b"demo-bytes")
+
+        job = DemoAnalysisJob.objects.create(
+            original_filename="b561b980-2b04-43f2-b096-f20544ed45e9.dem",
+            demo_file=f"demos/b1cbe607-a652-4924-9cd8-05bbc0ebe4c5_b561b980-2b04-43f2-b096-f20544ed45e9.dem",
+            status=DemoAnalysisJob.Status.PENDING,
+        )
+
+        tasks._run_upload_job(str(job.id), sample_every=8)
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, DemoAnalysisJob.Status.COMPLETED)
+        self.assertEqual(Path(job.demo_file.name).name, existing.name)
+
+
+@override_settings(MEDIA_ROOT=tempfile.gettempdir())
+class FixDemoFilePathsCommandTests(TestCase):
+    def test_command_fixes_missing_prefixed_paths_for_failed_jobs(self):
+        existing = Path(tempfile.gettempdir()) / "demos" / "legacy-match.dem"
+        existing.parent.mkdir(parents=True, exist_ok=True)
+        existing.write_bytes(b"demo-bytes")
+
+        job = DemoAnalysisJob.objects.create(
+            original_filename="legacy-match.dem",
+            demo_file="demos/11111111-1111-1111-1111-111111111111_legacy-match.dem",
+            status=DemoAnalysisJob.Status.FAILED,
+        )
+
+        out = StringIO()
+        call_command("fix_demo_file_paths", stdout=out)
+
+        job.refresh_from_db()
+        self.assertEqual(Path(job.demo_file.name).name, "legacy-match.dem")
+        self.assertIn("[fixed]", out.getvalue())

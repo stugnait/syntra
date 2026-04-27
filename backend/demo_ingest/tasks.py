@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from threading import Lock
 
 from django.db import close_old_connections
@@ -37,6 +38,40 @@ def _safe_set_status(job: DemoAnalysisJob, status: str) -> DemoAnalysisJob:
     return job
 
 
+def _recover_missing_demo_path(job: DemoAnalysisJob) -> Path:
+    demo_path = Path(job.demo_file.path)
+    if demo_path.exists():
+        return demo_path
+
+    search_dir = demo_path.parent
+    original_name = Path(job.original_filename).name
+    candidates: list[Path] = []
+
+    if "_" in demo_path.name:
+        _, _, stripped_name = demo_path.name.partition("_")
+        if stripped_name:
+            candidates.append(search_dir / stripped_name)
+
+    candidates.append(search_dir / original_name)
+
+    if original_name.endswith(".dem.gz"):
+        base = original_name[: -len(".dem.gz")]
+        suffix = ".dem.gz"
+    else:
+        base = Path(original_name).stem
+        suffix = Path(original_name).suffix
+    candidates.extend(sorted(search_dir.glob(f"{base}_*{suffix}")))
+
+    for candidate in candidates:
+        if candidate.exists():
+            upload_to = str(job.demo_file.field.upload_to).strip("/")
+            job.demo_file.name = f"{upload_to}/{candidate.name}" if upload_to else candidate.name
+            job.save(update_fields=["demo_file", "updated_at"])
+            return candidate
+
+    raise FileNotFoundError(f"File not found: {demo_path}")
+
+
 def _run_upload_job(job_id: str, sample_every: int) -> None:
     close_old_connections()
     try:
@@ -47,7 +82,8 @@ def _run_upload_job(job_id: str, sample_every: int) -> None:
 
     try:
         _safe_set_status(job, DemoAnalysisJob.Status.PROCESSING)
-        result = analyze_demo_file(job.demo_file.path, sample_every=sample_every)
+        demo_path = _recover_missing_demo_path(job)
+        result = analyze_demo_file(demo_path, sample_every=sample_every)
         job.result = result
         job.status = DemoAnalysisJob.Status.COMPLETED
         job.error_message = ""
