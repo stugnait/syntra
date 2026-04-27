@@ -42,6 +42,7 @@ export async function GET() {
   const cookieStore = await cookies()
   const sessionToken = cookieStore.get('syntra_session')?.value
   const faceitProfileRaw = cookieStore.get('faceit_profile')?.value
+  const faceitCallbackDebugRaw = cookieStore.get('faceit_callback_debug')?.value
 
   let sessionPayload: Record<string, unknown> | null = null
   if (sessionToken) {
@@ -57,11 +58,21 @@ export async function GET() {
     }
   }
 
+  let faceitCallbackDebug: Record<string, unknown> | null = null
+  if (faceitCallbackDebugRaw) {
+    try {
+      faceitCallbackDebug = JSON.parse(decodeURIComponent(faceitCallbackDebugRaw)) as Record<string, unknown>
+    } catch {
+      faceitCallbackDebug = null
+    }
+  }
+
   return NextResponse.json({
     has_session_cookie: Boolean(sessionToken),
     has_faceit_profile_cookie: Boolean(faceitProfileRaw),
+    has_faceit_callback_debug_cookie: Boolean(faceitCallbackDebugRaw),
     session_payload: sessionPayload,
     faceit_profile: faceitProfile,
+    faceit_callback_payload: faceitCallbackDebug,
   })
 }
-

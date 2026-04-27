@@ -28,6 +28,31 @@ type FaceitProfile = {
   avatar?: string
 }
 
+type FaceitCallbackDebugPayload = {
+  received_at: string
+  callback_query: Record<string, string>
+  popup_mode: boolean
+  oauth: {
+    state_matches_cookie: boolean
+    code_present: boolean
+  }
+  oidc: {
+    token_url: string
+    userinfo_url: string
+  }
+  token_exchange: {
+    status: number
+    ok: boolean
+    expires_in: number | null
+    has_access_token: boolean
+  }
+  profile_response: {
+    status: number
+    ok: boolean
+  }
+  profile: FaceitProfile
+}
+
 function toBase64Url(text: string) {
   return Buffer.from(text)
     .toString('base64')
@@ -188,6 +213,30 @@ export async function GET(request: NextRequest) {
     exp: now + maxAge,
   }
   const appSession = createAppSession(sessionPayload, APP_SESSION_SECRET)
+  const callbackDebugPayload: FaceitCallbackDebugPayload = {
+    received_at: new Date().toISOString(),
+    callback_query: Object.fromEntries(query.entries()),
+    popup_mode: popupMode,
+    oauth: {
+      state_matches_cookie: state === expectedState,
+      code_present: Boolean(code),
+    },
+    oidc: {
+      token_url: endpoints.tokenUrl,
+      userinfo_url: endpoints.userInfoUrl,
+    },
+    token_exchange: {
+      status: tokenResponse.status,
+      ok: tokenResponse.ok,
+      expires_in: tokenData.expires_in ?? null,
+      has_access_token: Boolean(tokenData.access_token),
+    },
+    profile_response: {
+      status: profileResponse.status,
+      ok: profileResponse.ok,
+    },
+    profile,
+  }
 
   const response = popupMode
     ? new NextResponse(
@@ -217,6 +266,13 @@ if (window.opener) {
   response.cookies.set('faceit_profile', encodeURIComponent(JSON.stringify(profile)), {
     path: '/',
     maxAge,
+    sameSite: 'lax',
+    secure: secureCookie,
+    httpOnly: true,
+  })
+  response.cookies.set('faceit_callback_debug', encodeURIComponent(JSON.stringify(callbackDebugPayload)), {
+    path: '/',
+    maxAge: Math.min(maxAge, 60 * 15),
     sameSite: 'lax',
     secure: secureCookie,
     httpOnly: true,
