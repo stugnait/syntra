@@ -88,6 +88,106 @@ def _extract_radar_frames(parsed: Any, sample_every: int = 8) -> dict[str, Any]:
     }
 
 
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _extract_player_stats(parsed: dict[str, Any]) -> dict[str, Any]:
+    stats = parsed.get("playerStats") or parsed.get("players") or []
+    if not isinstance(stats, list):
+        return {}
+
+    if stats:
+        target = max(
+            [p for p in stats if isinstance(p, dict)],
+            key=lambda p: _safe_int(p.get("kills")),
+            default={},
+        )
+    else:
+        target = {}
+
+    kills = _safe_int(target.get("kills"))
+    deaths = _safe_int(target.get("deaths"))
+    assists = _safe_int(target.get("assists"))
+    adr = round(_safe_float(target.get("adr") or target.get("averageDamagePerRound")), 2)
+    hs_percent = round(_safe_float(target.get("hsPercent") or target.get("headshotPercentage")), 2)
+
+    return {
+        "player": target.get("playerName") or target.get("name") or "unknown",
+        "kills": kills,
+        "deaths": deaths,
+        "assists": assists,
+        "kd": round(kills / deaths, 2) if deaths else float(kills),
+        "adr": adr,
+        "hs_percent": hs_percent,
+        "kast": round(_safe_float(target.get("kast")), 2),
+        "opening_kills": _safe_int(target.get("firstKills") or target.get("openingKills")),
+        "opening_deaths": _safe_int(target.get("firstDeaths") or target.get("openingDeaths")),
+        "flash_assists": _safe_int(target.get("flashAssists")),
+        "utility_damage": _safe_int(target.get("utilityDamage")),
+    }
+
+
+def _extract_round_timeline(parsed: dict[str, Any]) -> list[dict[str, Any]]:
+    rounds = parsed.get("gameRounds") or parsed.get("rounds") or []
+    timeline: list[dict[str, Any]] = []
+
+    for idx, round_data in enumerate(rounds, start=1):
+        if not isinstance(round_data, dict):
+            continue
+
+        winner_side = round_data.get("winningSide")
+        timeline.append(
+            {
+                "round": round_data.get("roundNum") or idx,
+                "winner_side": winner_side,
+                "reason": round_data.get("roundEndReason"),
+                "ct_score": round_data.get("endCTScore") or round_data.get("ctScore"),
+                "t_score": round_data.get("endTScore") or round_data.get("tScore"),
+            }
+        )
+
+    return timeline
+
+
+def _extract_metrics_summary(parsed: Any, sample_every: int) -> dict[str, Any]:
+    if not isinstance(parsed, dict):
+        return {"sample_every": sample_every}
+
+    round_timeline = _extract_round_timeline(parsed)
+    player_stats = _extract_player_stats(parsed)
+
+    final_ct = round_timeline[-1].get("ct_score") if round_timeline else None
+    final_t = round_timeline[-1].get("t_score") if round_timeline else None
+    result = "unknown"
+    if isinstance(final_ct, int) and isinstance(final_t, int):
+        if final_ct > final_t:
+            result = "ct_win"
+        elif final_t > final_ct:
+            result = "t_win"
+        else:
+            result = "draw"
+
+    return {
+        "map": parsed.get("mapName") or parsed.get("map"),
+        "sample_every": sample_every,
+        "rounds": len(round_timeline),
+        "score": {"ct": final_ct, "t": final_t, "result": result},
+        "player_stats": player_stats,
+        "round_timeline": round_timeline,
+    }
 def _parse_with_awpy(demo_path: Path, sample_every: int) -> dict[str, Any]:
     awpy = importlib.import_module("awpy")
 
@@ -101,6 +201,7 @@ def _parse_with_awpy(demo_path: Path, sample_every: int) -> dict[str, Any]:
                     "type": type(parsed).__name__,
                 },
                 "radar": _extract_radar_frames(parsed, sample_every=sample_every),
+                "metrics": _extract_metrics_summary(parsed, sample_every=sample_every),
                 "parsed": _json_safe(parsed),
             }
 
@@ -117,6 +218,7 @@ def _parse_with_awpy(demo_path: Path, sample_every: int) -> dict[str, Any]:
                         "type": type(parsed).__name__,
                     },
                     "radar": _extract_radar_frames(parsed, sample_every=sample_every),
+                    "metrics": _extract_metrics_summary(parsed, sample_every=sample_every),
                     "parsed": _json_safe(parsed),
                 }
 

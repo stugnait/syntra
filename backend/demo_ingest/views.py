@@ -170,3 +170,48 @@ def demo_job_radar(request: HttpRequest, job_id: str) -> HttpResponse:
             "radar": radar,
         }
     )
+
+
+@require_GET
+def demo_job_report(request: HttpRequest, job_id: str) -> HttpResponse:
+    try:
+        job = DemoAnalysisJob.objects.get(pk=job_id)
+    except DatabaseError:
+        return JsonResponse(
+            {"error": "Database is unavailable. Check DATABASE_URL and run migrations."},
+            status=503,
+        )
+    except DemoAnalysisJob.DoesNotExist:
+        return JsonResponse({"error": "Job not found."}, status=404)
+
+    if job.status != DemoAnalysisJob.Status.COMPLETED:
+        return JsonResponse(
+            {"error": "Report is available only for completed jobs.", "status": job.status},
+            status=409,
+        )
+
+    analysis = (job.result or {}).get("analysis") or {}
+    metrics = analysis.get("metrics") or {}
+    if not metrics:
+        return JsonResponse({"error": "No metrics found for this job."}, status=404)
+
+    return JsonResponse(
+        {
+            "job_id": str(job.id),
+            "original_filename": job.original_filename,
+            "report": {
+                "map": metrics.get("map"),
+                "rounds": metrics.get("rounds"),
+                "score": metrics.get("score"),
+                "player_stats": metrics.get("player_stats"),
+                "round_timeline": metrics.get("round_timeline"),
+                "metric_glossary": {
+                    "adr": "Average damage per round",
+                    "kast": "Percentage of rounds with Kill, Assist, Survived, or Traded",
+                    "opening_kills": "First kills secured in rounds",
+                    "opening_deaths": "First deaths suffered in rounds",
+                    "utility_damage": "Total grenade damage",
+                },
+            },
+        }
+    )

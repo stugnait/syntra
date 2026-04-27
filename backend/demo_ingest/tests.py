@@ -11,7 +11,7 @@ from .models import DemoAnalysisJob
 class DemoUploadTests(TestCase):
     @patch("demo_ingest.views.analyze_demo_file")
     def test_upload_creates_completed_job(self, mock_analyze):
-        mock_analyze.return_value = {"analysis": {"rounds": 24, "radar": {"frames": []}}}
+        mock_analyze.return_value = {"analysis": {"rounds": 24, "radar": {"frames": []}, "metrics": {"map": "de_mirage", "rounds": 24, "score": {"ct": 13, "t": 9}, "player_stats": {"kills": 20}}}}
         upload = SimpleUploadedFile("match.dem", b"demo-bytes")
 
         response = self.client.post(reverse("upload_demo"), {"demo": upload, "sample_every": 4})
@@ -31,9 +31,36 @@ class DemoUploadTests(TestCase):
         response = self.client.post(reverse("upload_demo"), {"demo": upload})
         self.assertEqual(response.status_code, 400)
 
+
+
+    @patch("demo_ingest.views.analyze_demo_file")
+    def test_report_endpoint_returns_metrics_payload(self, mock_analyze):
+        mock_analyze.return_value = {
+            "analysis": {
+                "radar": {"frames": []},
+                "metrics": {
+                    "map": "de_mirage",
+                    "rounds": 22,
+                    "score": {"ct": 13, "t": 9, "result": "ct_win"},
+                    "player_stats": {"player": "tester", "kills": 22, "deaths": 15},
+                    "round_timeline": [{"round": 1, "winner_side": "CT"}],
+                },
+            }
+        }
+        upload = SimpleUploadedFile("match.dem", b"demo-bytes")
+        create_response = self.client.post(reverse("upload_demo"), {"demo": upload})
+
+        job_id = create_response.json()["job_id"]
+        report_response = self.client.get(reverse("demo_job_report", kwargs={"job_id": job_id}))
+
+        self.assertEqual(report_response.status_code, 200)
+        payload = report_response.json()["report"]
+        self.assertEqual(payload["map"], "de_mirage")
+        self.assertEqual(payload["player_stats"]["kills"], 22)
+
     @patch("demo_ingest.views.analyze_demo_file")
     def test_job_status_endpoint_returns_payload(self, mock_analyze):
-        mock_analyze.return_value = {"analysis": {"rounds": 24, "radar": {"frames": []}}}
+        mock_analyze.return_value = {"analysis": {"rounds": 24, "radar": {"frames": []}, "metrics": {"map": "de_mirage", "rounds": 24, "score": {"ct": 13, "t": 9}, "player_stats": {"kills": 20}}}}
         upload = SimpleUploadedFile("match.dem", b"demo-bytes")
         create_response = self.client.post(reverse("upload_demo"), {"demo": upload})
 
