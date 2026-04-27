@@ -1,7 +1,8 @@
 "use client"
 
-import { use, useState, useEffect } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
+import { useParams } from "next/navigation"
 import {
   CheckCircle2, Clock, Loader2, AlertTriangle,
   FileText, ChevronRight,
@@ -28,6 +29,11 @@ const INITIAL_STEPS: Step[] = [
 // Simulates each step advancing over time
 const STEP_DELAYS = [1200, 1800, 2600, 3800, 5200, 7200] // ms at which step becomes "active"
 const STEP_DONE_EXTRA = 1100  // ms after active before marking done
+const DEMO_API_BASE = process.env.NEXT_PUBLIC_DEMO_API_BASE_URL ?? ""
+
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
 
 function StepRow({ step, index }: { step: Step; index: number }) {
   return (
@@ -126,20 +132,24 @@ function RadarAnimation({ progress }: { progress: number }) {
   )
 }
 
-export default function ProcessingPage({ params }: { params: Promise<{ jobId: string }> }) {
-  const { jobId } = use(params)
+export default function ProcessingPage() {
+  const { jobId } = useParams<{ jobId: string }>()
+  const shouldPollBackend = Boolean(jobId && isUuid(jobId))
 
   const [steps, setSteps] = useState<Step[]>(INITIAL_STEPS)
   const [eventsExtracted, setEventsExtracted] = useState(0)
   const [roundsProcessed, setRoundsProcessed] = useState(0)
   const [done, setDone] = useState(false)
   const [progress, setProgress] = useState(0)
+  const [errorText, setErrorText] = useState<string | null>(null)
 
   const totalRounds = 24
   const totalEvents = 482913
 
   // Advance steps
   useEffect(() => {
+    if (shouldPollBackend) return
+
     const timers: ReturnType<typeof setTimeout>[] = []
 
     STEP_DELAYS.forEach((delay, i) => {
@@ -160,7 +170,77 @@ export default function ProcessingPage({ params }: { params: Promise<{ jobId: st
     })
 
     return () => timers.forEach(clearTimeout)
-  }, [])
+  }, [shouldPollBackend])
+
+  // Poll real backend status when job id is a UUID
+  useEffect(() => {
+    if (!shouldPollBackend || !jobId) return
+
+    let active = true
+    setErrorText(null)
+
+    const syncStepState = (state: "processing" | "completed" | "failed") => {
+      if (state === "processing") {
+        setSteps((prev) => prev.map((s, i) => {
+          if (i === 0) return { ...s, status: "done" }
+          if (i === 1) return { ...s, status: "active" }
+          return { ...s, status: "pending" }
+        }))
+        setProgress((p) => Math.max(p, 12))
+        return
+      }
+
+      if (state === "completed") {
+        setSteps((prev) => prev.map((s) => ({ ...s, status: "done" })))
+        setDone(true)
+        setProgress(100)
+        setEventsExtracted(totalEvents)
+        setRoundsProcessed(totalRounds)
+        return
+      }
+
+      setSteps((prev) => prev.map((s, i) => {
+        if (i === 0) return { ...s, status: "done" }
+        if (i === 1) return { ...s, status: "failed" }
+        return { ...s, status: "pending" }
+      }))
+      setErrorText("Analysis failed. Open upload and retry with another demo file.")
+    }
+
+    const fetchStatus = async () => {
+      try {
+        const response = await fetch(`${DEMO_API_BASE}/api/demos/jobs/${jobId}/`, { cache: "no-store" })
+        if (!active) return
+        if (!response.ok) {
+          setErrorText("Job status is unavailable right now. Please refresh in a few seconds.")
+          return
+        }
+        const payload = await response.json() as { status?: string; error_message?: string | null }
+        if (!active) return
+
+        if (payload.status === "completed") {
+          syncStepState("completed")
+          return
+        }
+        if (payload.status === "failed") {
+          syncStepState("failed")
+          setErrorText(payload.error_message ?? "Analysis failed during demo parsing.")
+          return
+        }
+        syncStepState("processing")
+      } catch {
+        if (!active) return
+        setErrorText("Cannot reach demo API. Check backend URL / tunnel and retry.")
+      }
+    }
+
+    fetchStatus()
+    const pollId = setInterval(fetchStatus, 2000)
+    return () => {
+      active = false
+      clearInterval(pollId)
+    }
+  }, [jobId, shouldPollBackend, totalEvents, totalRounds])
 
   // Animate counters
   useEffect(() => {
@@ -181,7 +261,7 @@ export default function ProcessingPage({ params }: { params: Promise<{ jobId: st
             {done ? "Tactical Report Ready" : "Processing Tactical Report"}
           </h1>
           <p className="text-sm text-zinc-500">
-            {done ? "Your match analysis is complete." : "Mirage demo is being analyzed — sit tight"}
+            {done ? "Your match analysis is complete." : `Demo ${jobId ?? ""} is being analyzed — sit tight`}
           </p>
         </div>
 
@@ -235,6 +315,15 @@ export default function ProcessingPage({ params }: { params: Promise<{ jobId: st
                 </div>
               ))}
             </div>
+          </div>
+        )}
+
+        {errorText && (
+          <div
+            className="rounded-2xl px-4 py-3 mb-5 text-xs text-amber-300"
+            style={{ background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.2)" }}
+          >
+            {errorText}
           </div>
         )}
 
