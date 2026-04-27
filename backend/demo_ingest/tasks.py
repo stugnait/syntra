@@ -36,7 +36,7 @@ def _parser_process_entrypoint(demo_path: str, sample_every: int, output_queue) 
                 "error": traceback.format_exc(),
             }
         )
-        raise
+        return
 
 
 def _analyze_with_timeout(demo_path: str | Path, *, sample_every: int) -> dict:
