@@ -35,6 +35,10 @@ function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
 function StepRow({ step, index }: { step: Step; index: number }) {
   return (
     <div className={cn("flex items-center gap-4 py-2.5 transition-opacity", step.status === "pending" && "opacity-40")}>
@@ -209,7 +213,7 @@ export default function ProcessingPage() {
 
     const fetchStatus = async () => {
       try {
-        const response = await fetch(`${DEMO_API_BASE}/api/demos/jobs/${jobId}/`, { cache: "no-store" })
+        const response = await fetch(`/api/demos/jobs/${jobId}/`, { cache: "no-store" })
         if (!active) return
         if (!response.ok) {
           setErrorText("Job status is unavailable right now. Please refresh in a few seconds.")

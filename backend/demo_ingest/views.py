@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.db import DatabaseError
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 
@@ -15,14 +16,21 @@ def upload_demo(request: HttpRequest) -> HttpResponse:
     if demo_file is None:
         return JsonResponse({"error": "No file provided. Use form-data key `demo`."}, status=400)
 
-    if not demo_file.name.lower().endswith(".dem"):
-        return JsonResponse({"error": "Only .dem files are supported."}, status=400)
+    lower_name = demo_file.name.lower()
+    if not (lower_name.endswith(".dem") or lower_name.endswith(".dem.gz")):
+        return JsonResponse({"error": "Only .dem and .dem.gz files are supported."}, status=400)
 
-    job = DemoAnalysisJob.objects.create(
-        original_filename=demo_file.name,
-        demo_file=demo_file,
-        status=DemoAnalysisJob.Status.PROCESSING,
-    )
+    try:
+        job = DemoAnalysisJob.objects.create(
+            original_filename=demo_file.name,
+            demo_file=demo_file,
+            status=DemoAnalysisJob.Status.PROCESSING,
+        )
+    except DatabaseError:
+        return JsonResponse(
+            {"error": "Database is unavailable. Check DATABASE_URL and run migrations."},
+            status=503,
+        )
 
     try:
         result = analyze_demo_file(job.demo_file.path)
@@ -51,6 +59,11 @@ def upload_demo(request: HttpRequest) -> HttpResponse:
 def demo_job_status(request: HttpRequest, job_id: str) -> HttpResponse:
     try:
         job = DemoAnalysisJob.objects.get(pk=job_id)
+    except DatabaseError:
+        return JsonResponse(
+            {"error": "Database is unavailable. Check DATABASE_URL and run migrations."},
+            status=503,
+        )
     except DemoAnalysisJob.DoesNotExist:
         return JsonResponse({"error": "Job not found."}, status=404)
 
