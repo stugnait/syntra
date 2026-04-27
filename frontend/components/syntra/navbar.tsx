@@ -60,7 +60,7 @@ export function Navbar() {
             href="/auth"
             className="text-white text-sm font-semibold px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 transition-all duration-200 glow-violet-sm hover:glow-violet"
           >
-            Connect FACEIT
+            Get Started
           </Link>
         </div>
 
@@ -92,7 +92,7 @@ export function Navbar() {
               Sign In
             </Link>
             <Link href="/auth" className="text-center text-white text-sm font-semibold py-2.5 bg-violet-600 rounded-xl">
-              Connect FACEIT
+              Get Started
             </Link>
           </div>
         </div>
