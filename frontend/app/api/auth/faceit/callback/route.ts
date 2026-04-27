@@ -74,16 +74,32 @@ async function resolveOidcEndpoints() {
 }
 
 function isSecureRequest(request: NextRequest) {
+  const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim()
+  if (forwardedProto === 'https') {
+    return true
+  }
+
   if (request.nextUrl.protocol === 'https:') {
     return true
   }
 
-  return request.headers.get('x-forwarded-proto') === 'https'
+  return false
+}
+
+function resolveRequestOrigin(request: NextRequest) {
+  const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim()
+  const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim()
+  if (forwardedProto && forwardedHost) {
+    return `${forwardedProto}://${forwardedHost}`
+  }
+
+  return request.nextUrl.origin
 }
 
 export async function GET(request: NextRequest) {
-  const appOrigin = process.env.APP_ORIGIN ?? request.nextUrl.origin
-  const redirectUri = FACEIT_REDIRECT_URI ?? `${request.nextUrl.origin}/api/auth/faceit/callback`
+  const requestOrigin = resolveRequestOrigin(request)
+  const appOrigin = process.env.APP_ORIGIN ?? requestOrigin
+  const redirectUri = FACEIT_REDIRECT_URI ?? `${requestOrigin}/api/auth/faceit/callback`
   const secureCookie = isSecureRequest(request)
 
   const query = request.nextUrl.searchParams

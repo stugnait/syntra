@@ -7,12 +7,27 @@ const FACEIT_CLIENT_ID = process.env.FACEIT_CLIENT_ID ?? process.env.NEXT_PUBLIC
 const FACEIT_SCOPE = process.env.FACEIT_SCOPE ?? process.env.FACEIT_AUTH_URL ?? 'openid profile email'
 
 function isSecureRequest(request: Request) {
+  const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim()
+  if (forwardedProto === 'https') {
+    return true
+  }
+
   const url = new URL(request.url)
   if (url.protocol === 'https:') {
     return true
   }
 
-  return request.headers.get('x-forwarded-proto') === 'https'
+  return false
+}
+
+function resolveRequestOrigin(request: Request) {
+  const forwardedProto = request.headers.get('x-forwarded-proto')?.split(',')[0]?.trim()
+  const forwardedHost = request.headers.get('x-forwarded-host')?.split(',')[0]?.trim()
+  if (forwardedProto && forwardedHost) {
+    return `${forwardedProto}://${forwardedHost}`
+  }
+
+  return new URL(request.url).origin
 }
 
 function toBase64Url(value: Buffer) {
@@ -32,8 +47,8 @@ function sha256(value: string) {
 }
 
 export async function GET(request: Request) {
-  const requestUrl = new URL(request.url)
-  const appOrigin = process.env.APP_ORIGIN ?? requestUrl.origin
+  const requestOrigin = resolveRequestOrigin(request)
+  const appOrigin = process.env.APP_ORIGIN ?? requestOrigin
 
   if (!FACEIT_CLIENT_ID) {
     return NextResponse.redirect(new URL('/auth?error=missing_faceit_client_id', appOrigin))
@@ -43,7 +58,7 @@ export async function GET(request: Request) {
   const state = randomString(32)
   const codeChallenge = sha256(codeVerifier)
 
-  const configuredRedirectUri = FACEIT_REDIRECT_URI ?? `${requestUrl.origin}/api/auth/faceit/callback`
+  const configuredRedirectUri = FACEIT_REDIRECT_URI ?? `${requestOrigin}/api/auth/faceit/callback`
   const secureCookie = isSecureRequest(request)
 
   const popupParam = new URL(request.url).searchParams.get('popup')

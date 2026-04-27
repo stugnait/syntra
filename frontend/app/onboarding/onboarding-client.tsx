@@ -533,6 +533,20 @@ export default function OnboardingClient({ initialStep = 0 }: { initialStep?: nu
     }
   }, [])
 
+  useEffect(() => {
+    const logFaceitDebugData = async () => {
+      const response = await fetch('/api/auth/debug/faceit', { cache: 'no-store' })
+      if (!response.ok) return
+
+      const payload = await response.json()
+      console.group('SYNTRA FACEIT DEBUG DATA')
+      console.log(payload)
+      console.groupEnd()
+    }
+
+    logFaceitDebugData()
+  }, [])
+
   return (
     <div className="relative min-h-screen bg-[#07070F] flex flex-col items-center justify-center overflow-hidden px-6 py-12">
       <AnimatedBg />
