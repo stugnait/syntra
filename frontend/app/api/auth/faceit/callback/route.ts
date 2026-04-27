@@ -9,7 +9,10 @@ const FACEIT_USERINFO_URL = process.env.FACEIT_USERINFO_URL
 const FACEIT_REDIRECT_URI = process.env.FACEIT_REDIRECT_URI
 const FACEIT_CLIENT_ID = process.env.FACEIT_CLIENT_ID
 const FACEIT_CLIENT_SECRET = process.env.FACEIT_CLIENT_SECRET
-const APP_SESSION_SECRET = process.env.APP_SESSION_SECRET
+const APP_SESSION_SECRET =
+  process.env.APP_SESSION_SECRET ??
+  process.env.FACEIT_CLIENT_SECRET ??
+  'syntra-dev-session-secret-change-me'
 
 type OidcConfig = {
   token_endpoint?: string
@@ -102,10 +105,6 @@ export async function GET(request: NextRequest) {
 
   if (!FACEIT_CLIENT_ID) {
     return NextResponse.redirect(new URL('/auth?error=missing_faceit_client_id', appOrigin))
-  }
-
-  if (!APP_SESSION_SECRET) {
-    return NextResponse.redirect(new URL('/auth?error=missing_app_session_secret', appOrigin))
   }
 
   let endpoints: { tokenUrl: string; userInfoUrl: string }

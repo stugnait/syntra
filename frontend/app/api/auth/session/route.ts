@@ -2,6 +2,11 @@ import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import { createHmac, timingSafeEqual } from 'node:crypto'
 
+const APP_SESSION_SECRET =
+  process.env.APP_SESSION_SECRET ??
+  process.env.FACEIT_CLIENT_SECRET ??
+  'syntra-dev-session-secret-change-me'
+
 type SessionPayload = {
   provider?: string
   nickname?: string
@@ -39,7 +44,7 @@ function verifySession(token: string, secret: string) {
 export async function GET() {
   const cookieStore = await cookies()
   const session = cookieStore.get('syntra_session')?.value
-  const secret = process.env.APP_SESSION_SECRET
+  const secret = APP_SESSION_SECRET
 
   if (!session || !secret) {
     return NextResponse.json({ authenticated: false }, { status: 401 })
