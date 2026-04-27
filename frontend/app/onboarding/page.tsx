@@ -11,13 +11,25 @@ function StepWelcome({ onNext, playerName }: { onNext: () => void; playerName: s
   const [scanPct, setScanPct] = useState(0)
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setScanPct((p) => {
-        if (p >= 100) { clearInterval(interval); return 100 }
-        return p + 1.4
-      })
-    }, 28)
-    return () => clearInterval(interval)
+    const durationMs = 2200
+    const start = performance.now()
+    let frameId = 0
+
+    const tick = (now: number) => {
+      const elapsed = now - start
+      const progress = Math.min((elapsed / durationMs) * 100, 100)
+      setScanPct(progress)
+
+      if (progress < 100) {
+        frameId = window.requestAnimationFrame(tick)
+      }
+    }
+
+    frameId = window.requestAnimationFrame(tick)
+
+    return () => {
+      window.cancelAnimationFrame(frameId)
+    }
   }, [])
 
   const done = scanPct >= 100
