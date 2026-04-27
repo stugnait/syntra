@@ -37,6 +37,9 @@ def _parser_process_entrypoint(demo_path: str, sample_every: int, output_queue) 
             }
         )
         return
+    finally:
+        output_queue.close()
+        output_queue.join_thread()
 
 
 def _analyze_with_timeout(demo_path: str | Path, *, sample_every: int) -> dict:
@@ -60,7 +63,7 @@ def _analyze_with_timeout(demo_path: str | Path, *, sample_every: int) -> dict:
 
     payload = None
     try:
-        payload = output_queue.get_nowait()
+        payload = output_queue.get(timeout=2)
     except queue.Empty:
         pass
 
