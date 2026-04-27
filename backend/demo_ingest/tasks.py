@@ -54,6 +54,34 @@ def _safe_set_processing_state(job: DemoAnalysisJob, *, stage: str, progress: in
         LOGGER.exception("Could not update processing state for job %s", job.id)
 
 
+def _analyze_with_timeout(demo_path: str | Path, *, sample_every: int) -> dict:
+    parser_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="demo-parse")
+    future = parser_executor.submit(analyze_demo_file, demo_path, sample_every)
+    try:
+        return future.result(timeout=max(1, PARSING_TIMEOUT_SECONDS))
+    except FutureTimeoutError as exc:
+        future.cancel()
+        raise TimeoutError(
+            f"Demo parsing timed out after {PARSING_TIMEOUT_SECONDS}s. Please try another demo file."
+        ) from exc
+    finally:
+        parser_executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _save_job_with_retries(job: DemoAnalysisJob, *, update_fields: list[str], retries: int = 3) -> None:
+    for attempt in range(1, retries + 1):
+        try:
+            job.save(update_fields=update_fields)
+            return
+        except Exception:  # noqa: BLE001
+            LOGGER.exception("Job save failed on attempt %s/%s for job %s", attempt, retries, job.id)
+            close_old_connections()
+            if attempt < retries:
+                time.sleep(0.25)
+            else:
+                raise
+
+
 def _safe_set_status(job: DemoAnalysisJob, status: str) -> DemoAnalysisJob:
     job.status = status
     job.save(update_fields=["status", "updated_at"])
@@ -138,6 +166,10 @@ def _run_upload_job(job_id: str, sample_every: int) -> None:
         _safe_set_processing_state(job, stage="failed", progress=100, message=str(exc))
         job.status = DemoAnalysisJob.Status.FAILED
         job.error_message = str(exc)
+    except TimeoutError as exc:
+        _set_processing_state(job, stage="failed", progress=100, message=str(exc))
+        job.status = DemoAnalysisJob.Status.FAILED
+        job.error_message = str(exc)
     except Exception as exc:  # noqa: BLE001
         _safe_set_processing_state(job, stage="failed", progress=100, message=f"Unexpected parser error: {exc}")
         job.status = DemoAnalysisJob.Status.FAILED
@@ -181,6 +213,10 @@ def _run_import_job(job_id: str, demo_url: str, sample_every: int) -> None:
         job.error_message = str(exc)
     except TimeoutError as exc:
         _safe_set_processing_state(job, stage="failed", progress=100, message=str(exc))
+        job.status = DemoAnalysisJob.Status.FAILED
+        job.error_message = str(exc)
+    except TimeoutError as exc:
+        _set_processing_state(job, stage="failed", progress=100, message=str(exc))
         job.status = DemoAnalysisJob.Status.FAILED
         job.error_message = str(exc)
     except Exception as exc:  # noqa: BLE001

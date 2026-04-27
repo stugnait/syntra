@@ -181,6 +181,22 @@ class TaskEnqueueTests(SimpleTestCase):
         with self.assertRaises(TimeoutError):
             tasks._analyze_with_timeout(f"/tmp/{uuid4()}.dem", sample_every=8)
 
+    @patch("demo_ingest.tasks.analyze_demo_file")
+    @patch("demo_ingest.tasks.PARSING_TIMEOUT_SECONDS", 1)
+    def test_analyze_with_timeout_raises_timeout_error(self, mock_analyze):
+        from demo_ingest import tasks
+
+        def _sleepy(*_args, **_kwargs):
+            import time
+
+            time.sleep(2)
+            return {"analysis": {}}
+
+        mock_analyze.side_effect = _sleepy
+
+        with self.assertRaises(TimeoutError):
+            tasks._analyze_with_timeout(f"/tmp/{uuid4()}.dem", sample_every=8)
+
 
 @override_settings(MEDIA_ROOT=tempfile.gettempdir())
 class TaskUploadRecoveryTests(TestCase):
