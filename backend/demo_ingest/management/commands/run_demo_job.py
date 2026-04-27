@@ -11,7 +11,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("--mode", choices=["upload", "import"], required=True)
         parser.add_argument("--job-id", required=True)
-        parser.add_argument("--sample-every", type=int, default=8)
+        parser.add_argument("--sample-every", type=int, default=64)
         parser.add_argument("--demo-url")
 
     def handle(self, *args, **options):
