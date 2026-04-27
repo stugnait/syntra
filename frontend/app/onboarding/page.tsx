@@ -12,23 +12,26 @@ function StepWelcome({ onNext, playerName }: { onNext: () => void; playerName: s
 
   useEffect(() => {
     const durationMs = 2200
-    const start = performance.now()
-    let frameId = 0
+    const startedAt = Date.now()
 
-    const tick = (now: number) => {
-      const elapsed = now - start
+    const intervalId = window.setInterval(() => {
+      const elapsed = Date.now() - startedAt
       const progress = Math.min((elapsed / durationMs) * 100, 100)
       setScanPct(progress)
 
-      if (progress < 100) {
-        frameId = window.requestAnimationFrame(tick)
+      if (progress >= 100) {
+        window.clearInterval(intervalId)
       }
-    }
+    }, 50)
 
-    frameId = window.requestAnimationFrame(tick)
+    const hardStopId = window.setTimeout(() => {
+      setScanPct(100)
+      window.clearInterval(intervalId)
+    }, durationMs + 300)
 
     return () => {
-      window.cancelAnimationFrame(frameId)
+      window.clearInterval(intervalId)
+      window.clearTimeout(hardStopId)
     }
   }, [])
 
