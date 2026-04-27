@@ -10,10 +10,17 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
+import os
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
+
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+load_dotenv(BASE_DIR / '.env', override=False)
+load_dotenv(BASE_DIR.parent / '.env', override=False)
 
 
 # Quick-start development settings - unsuitable for production
@@ -25,7 +32,7 @@ SECRET_KEY = 'django-insecure-3!pw9rvh1ru-1vkyj25+l^damq^3=peh8p4xlm-mu39)32$vie
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [host.strip() for host in os.getenv('ALLOWED_HOSTS', '*').split(',') if host.strip()]
 
 
 # Application definition
@@ -74,8 +81,56 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
 
+def _database_from_url() -> dict | None:
+    database_url = os.getenv('DATABASE_URL')
+    if not database_url:
+        return None
+
+    parsed = urlparse(database_url)
+    scheme = parsed.scheme.lower()
+
+    if scheme.startswith('postgres'):
+        query = parse_qs(parsed.query)
+        return {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': parsed.path.lstrip('/'),
+            'USER': parsed.username or '',
+            'PASSWORD': parsed.password or '',
+            'HOST': parsed.hostname or '',
+            'PORT': str(parsed.port or ''),
+            'CONN_MAX_AGE': int(os.getenv('DB_CONN_MAX_AGE', '60')),
+            'OPTIONS': {'sslmode': query.get('sslmode', ['prefer'])[0]},
+        }
+
+    if scheme in {'sqlite', 'sqlite3'}:
+        sqlite_path = parsed.path if parsed.path else '/db.sqlite3'
+        return {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': sqlite_path,
+        }
+
+    raise RuntimeError(f'Unsupported DATABASE_URL scheme: {scheme}')
+
+
+def _database_from_parts() -> dict | None:
+    db_name = os.getenv('DB_NAME') or os.getenv('POSTGRES_DB')
+    if not db_name:
+        return None
+
+    return {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': db_name,
+        'USER': os.getenv('DB_USER') or os.getenv('POSTGRES_USER') or '',
+        'PASSWORD': os.getenv('DB_PASSWORD') or os.getenv('POSTGRES_PASSWORD') or '',
+        'HOST': os.getenv('DB_HOST') or os.getenv('POSTGRES_HOST') or '127.0.0.1',
+        'PORT': os.getenv('DB_PORT') or os.getenv('POSTGRES_PORT') or '5432',
+        'CONN_MAX_AGE': int(os.getenv('DB_CONN_MAX_AGE', '60')),
+        'OPTIONS': {'sslmode': os.getenv('DB_SSLMODE', 'prefer')},
+    }
+
+
 DATABASES = {
-    'default': {
+    'default': _database_from_url() or _database_from_parts() or {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
     }
