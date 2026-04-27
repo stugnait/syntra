@@ -4,8 +4,10 @@ import { NextRequest, NextResponse } from 'next/server'
 
 const FACEIT_OIDC_CONFIG_URL =
   process.env.FACEIT_OIDC_CONFIG_URL ?? 'https://api.faceit.com/auth/v1/openid_configuration'
-const FACEIT_TOKEN_URL = process.env.FACEIT_TOKEN_URL
-const FACEIT_USERINFO_URL = process.env.FACEIT_USERINFO_URL
+const FACEIT_TOKEN_URL =
+  process.env.FACEIT_TOKEN_URL ?? 'https://api.faceit.com/auth/v1/oauth/token'
+const FACEIT_USERINFO_URL =
+  process.env.FACEIT_USERINFO_URL ?? 'https://api.faceit.com/auth/v1/resources/userinfo'
 const FACEIT_REDIRECT_URI = process.env.FACEIT_REDIRECT_URI
 const FACEIT_CLIENT_ID = process.env.FACEIT_CLIENT_ID
 const FACEIT_CLIENT_SECRET = process.env.FACEIT_CLIENT_SECRET
@@ -74,6 +76,21 @@ function createAppSession(payload: Record<string, unknown>, secret: string) {
   return `${header}.${body}.${signature}`
 }
 
+async function fetchWithTimeout(url: string, options: RequestInit = {}, timeoutMs = 6000) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      cache: 'no-store',
+    })
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function resolveOidcEndpoints() {
   if (FACEIT_TOKEN_URL && FACEIT_USERINFO_URL) {
     return {
@@ -82,7 +99,7 @@ async function resolveOidcEndpoints() {
     }
   }
 
-  const discoveryResponse = await fetch(FACEIT_OIDC_CONFIG_URL, { cache: 'no-store' })
+  const discoveryResponse = await fetchWithTimeout(FACEIT_OIDC_CONFIG_URL)
   if (!discoveryResponse.ok) {
     throw new Error('FACEIT OIDC discovery failed')
   }
@@ -152,18 +169,19 @@ export async function GET(request: NextRequest) {
   try {
     endpoints = await resolveOidcEndpoints()
   } catch {
-    return NextResponse.redirect(new URL('/auth?error=faceit_discovery_failed', appOrigin))
+    return NextResponse.redirect(new URL('/auth?error=faceit_discovery_failed_or_timed_out', appOrigin))
   }
 
   const headers: HeadersInit = {
     'content-type': 'application/x-www-form-urlencoded',
+    accept: 'application/json',
   }
 
   if (FACEIT_CLIENT_SECRET) {
     headers.authorization = `Basic ${Buffer.from(`${FACEIT_CLIENT_ID}:${FACEIT_CLIENT_SECRET}`).toString('base64')}`
   }
 
-  const tokenResponse = await fetch(endpoints.tokenUrl, {
+  const tokenResponse = await fetchWithTimeout(endpoints.tokenUrl, {
     method: 'POST',
     headers,
     body: new URLSearchParams({
@@ -189,11 +207,11 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(new URL('/auth?error=faceit_access_token_missing', appOrigin))
   }
 
-  const profileResponse = await fetch(endpoints.userInfoUrl, {
+  const profileResponse = await fetchWithTimeout(endpoints.userInfoUrl, {
     headers: {
       authorization: `Bearer ${tokenData.access_token}`,
+      accept: 'application/json',
     },
-    cache: 'no-store',
   })
 
   if (!profileResponse.ok) {
